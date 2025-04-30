@@ -1,0 +1,15 @@
+{
+    "bindings": [
+        {
+            "name": "event",
+            "type": "eventGridTrigger",
+            "direction": "in"
+        },
+        {
+            "name": "http",
+            "type": "httpTrigger",
+            "direction": "in"
+        }
+    ],
+    "scriptFile": "function_app.py"
+}
