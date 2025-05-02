@@ -4,6 +4,11 @@ import azure.communication.callautomation as azCall
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 import time
+import azure.core.exceptions as azexceptions
+import http.client as http_client
+http_client.HTTPConnection.debuglevel = 1
+logging.getLogger("azure").setLevel(logging.DEBUG)
+logging.getLogger("urllib3").setLevel(logging.DEBUG)
 
 
 key_vault_name = "keyvault-t-bachelor2025"
@@ -27,6 +32,7 @@ callback_uri = "https://a0de-88-92-77-94.ngrok-free.app/callback"
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.event_grid_trigger(arg_name="event")
+@app.function_name(name="EventGridTrigger")
 def EventGridTrigger(event: func.EventGridEvent): 
     logging.info('Python EventGrid trigger processed an event')
     event_data = event.get_json()
@@ -73,8 +79,10 @@ def wait_for_established(call_connection_client, max_retries=10, delay=1):
 
 def audioTest(call_automation_client: azCall.CallAutomationClient, call_connection):
     try:
-        sas_token = "sp=r&st=2025-05-02T01:25:03Z&se=2025-05-31T09:25:03Z&spr=https&sv=2024-11-04&sr=c&sig=WYE2D%2BxK1BDatTP9Dsr%2FTWxTIy2YrASTB8kJY8i0nwM%3D"
-        play_source = azCall.FileSource("https://stfeilmelding001.blob.core.windows.net/audio-for-playback/Recording.wav" + "?" + sas_token)
+        # sas_token = "sp=r&st=2025-05-02T01:25:03Z&se=2025-05-31T09:25:03Z&spr=https&sv=2024-11-04&sr=c&sig=WYE2D%2BxK1BDatTP9Dsr%2FTWxTIy2YrASTB8kJY8i0nwM%3D"
+        # play_source = azCall.FileSource("https://stfeilmelding001.blob.core.windows.net/audio-for-playback/Recording.wav" + "?" + sas_token)
+        play_source = azCall.FileSource("https://stfeilmelding001.blob.core.windows.net/audio-for-playback/Recording.wav")
+        
         logging.info(f"Found sound source from storage account: {play_source.url}")
         call_connection_client = call_automation_client.get_call_connection(call_connection_id=call_connection.call_connection_id)
         logging.info(f"Created call_connection_client: {call_connection_client}")
@@ -97,20 +105,33 @@ def recordCall(event_data: dict, call_connection: azCall.CallConnectionPropertie
     try:
         serverCallId = call_connection.server_call_id
         logging.info(f'Server Call ID: {serverCallId}')
-        sas_token = "sp=r&st=2025-05-02T13:56:21Z&se=2025-06-01T21:56:21Z&spr=https&sv=2024-11-04&sr=c&sig=t1iySIkhKpKy8WZ8IxbSDKYVjKOQI4%2F3OpLGLY2COR4%3D"
-        blob_container_url = "https://stfeilmelding001.blob.core.windows.net/opptaker" + "?" + sas_token
-        
+        # sas_token = "sp=racwdli&st=2025-05-02T13:56:21Z&se=2025-06-01T21:56:21Z&spr=https&sv=2024-11-04&sr=c&sig=Rgat6%2F6W6zfa6eFDMT5vTf8BrN%2BFj%2BgH8IMwDi8AN4c%3D"
+        # blob_container_url = "https://stfeilmelding001.blob.core.windows.net/opptaker" + "?" + sas_token
+        blob_container_url = "https://stfeilmelding001.blob.core.windows.net/opptaker"
+
         # Start recording with direct parameter specification
-        response = call_automation_client.start_recording(
-            server_call_id=serverCallId, 
-            recording_state_callback_url=callback_uri,
-            recording_content_type=azCall.RecordingContent.AUDIO,
-            recording_channel_type=azCall.RecordingChannel.UNMIXED,
-            recording_format_type=azCall.RecordingFormat.WAV,
-            recording_storage=azCall.AzureBlobContainerRecordingStorage(blob_container_url)
-        )
-        # recording_storage = "https://stfeilmelding001.blob.core.windows.net/opptaker" + "?" + sas_token
+        try:
+            response = call_automation_client.start_recording(
+                server_call_id=serverCallId,
+                recording_state_callback_url=callback_uri,
+                recording_content_type=azCall.RecordingContent.AUDIO,
+                recording_channel_type=azCall.RecordingChannel.UNMIXED,
+                recording_format_type=azCall.RecordingFormat.WAV,
+                recording_storage=azCall.AzureBlobContainerRecordingStorage(container_url=blob_container_url)
+            )
+        except azexceptions.HttpResponseError as e:
+            logging.error(f"Azure Error Code: {e.status_code}")
+            logging.error(f"Azure Error Message: {e.message}")
+            logging.error(f"Response JSON: {e.response.content.decode('utf-8')}")
+        except Exception as e:
+            import traceback
+            logging.error("Exception occurred during recording.")
+            logging.error(f"Error: {e}")
+            logging.error(traceback.format_exc())
+
         logging.info(f'Recording ID: {response.recording_id}')
+        # recording_properties = call_automation_client.get_recording_properties(response.recording_id)
+        # recording_download_url = call_automation_client.download_recording(recording_id=response.recording_id, destination_path="output.wav")
         # max_tones_to_collect = 5
         # dtmf_recognize=call_automation_client.get_call_connection(call_connection.call_connection_id).start_recognizing_media( 
         #     dtmf_max_tones_to_collect=max_tones_to_collect, 
