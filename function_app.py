@@ -90,22 +90,26 @@ def audioTest(call_automation_client: azCall.CallAutomationClient, call_connecti
         logging.error(f"Error in AudioTest-function: {e}")
 
 
-def recordCall(event_data: dict, call_connection, call_automation_client: azCall.CallAutomationClient):
+def recordCall(event_data: dict, call_connection: azCall.CallConnectionProperties, call_automation_client: azCall.CallAutomationClient):
     logging.info('Started running recordCall-function')
     incomingCallContext=event_data.get("incomingCallContext")
     audioTest(call_automation_client, call_connection)  
     try:
         serverCallId = call_connection.server_call_id
         logging.info(f'Server Call ID: {serverCallId}')
-        sas_token = "sp=r&st=2025-05-02T11:18:32Z&se=2025-05-31T19:18:32Z&spr=https&sv=2024-11-04&sr=c&sig=%2FhL16YidcCLRYCkH%2FEDBcCBz3CRfpcKjQwHgoP66gqs%3D"
+        sas_token = "sp=r&st=2025-05-02T13:56:21Z&se=2025-06-01T21:56:21Z&spr=https&sv=2024-11-04&sr=c&sig=t1iySIkhKpKy8WZ8IxbSDKYVjKOQI4%2F3OpLGLY2COR4%3D"
+        blob_container_url = "https://stfeilmelding001.blob.core.windows.net/opptaker" + "?" + sas_token
+        
+        # Start recording with direct parameter specification
         response = call_automation_client.start_recording(
             server_call_id=serverCallId, 
             recording_state_callback_url=callback_uri,
-            recording_content_type = azCall.RecordingContent.AUDIO,
-            recording_channel_type = azCall.RecordingChannel.UNMIXED,
-            recording_format_type = azCall.RecordingFormat.MP3,
+            recording_content_type=azCall.RecordingContent.AUDIO,
+            recording_channel_type=azCall.RecordingChannel.UNMIXED,
+            recording_format_type=azCall.RecordingFormat.WAV,
+            recording_storage=azCall.AzureBlobContainerRecordingStorage(blob_container_url)
         )
-        recording_storage = "https://stfeilmelding001.blob.core.windows.net/opptaker" + "?" + sas_token
+        # recording_storage = "https://stfeilmelding001.blob.core.windows.net/opptaker" + "?" + sas_token
         logging.info(f'Recording ID: {response.recording_id}')
         # max_tones_to_collect = 5
         # dtmf_recognize=call_automation_client.get_call_connection(call_connection.call_connection_id).start_recognizing_media( 
