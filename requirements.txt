@@ -3,7 +3,6 @@
 # Manually managing azure-functions-worker may cause unexpected issues
 
 azure-functions
-Flask>=2.3.2
 azure-eventgrid==4.11.0
 azure-communication-callautomation==1.1.0
 azure-keyvault-secrets

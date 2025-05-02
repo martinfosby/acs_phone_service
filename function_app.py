@@ -3,6 +3,7 @@ import azure.functions as func
 import azure.communication.callautomation as azCall
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
+import time
 
 
 key_vault_name = "keyvault-t-bachelor2025"
@@ -13,77 +14,99 @@ credential = DefaultAzureCredential()
 client = SecretClient(vault_url=KVUri, credential=credential)
 
 acs_retrieved_secret = client.get_secret(acs_secret_name)
-app_retrieved_secret=client.get_secret(app_secret_name)
+app_retrieved_secret = client.get_secret(app_secret_name)
 
 # Now you can use the API key:
 
 acsConnectionString = acs_retrieved_secret.value
 
-callback_uri=app_retrieved_secret.value
+# callback_uri = app_retrieved_secret.id
+# callback_uri = "http://127.0.0.1:5000/callback"
+callback_uri = "https://a0de-88-92-77-94.ngrok-free.app/callback"
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-@app.function_name(name="eventGridTrigger")
 @app.event_grid_trigger(arg_name="event")
-def eventGridTest(event: func.EventGridEvent): 
+def EventGridTrigger(event: func.EventGridEvent): 
     logging.info('Python EventGrid trigger processed an event')
-    logging.info('Successfully reacted to call')
-    event_data=event.get_json()
-    # if event_data.get("eventType") == "Microsoft.Communication.IncomingCall":
-    call_automation_client = azCall.CallAutomationClient.from_connection_string(acsConnectionString)
-    logging.info(f'Created call_automation_client')
-    call_connection=answerCall(event_data.get("incomingCallContext"), call_automation_client)
-    logging.info(f'Event data: {event_data}')
-    logging.info('Successfully answered call')
-    audioTest(call_automation_client, call_connection=call_connection)
-    # recordCall(event_data, call_connection)
+    event_data = event.get_json()
+    event_type = event.event_type
+
+     # Handle subscription validation
+    if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
+        logging.info('Subscription validation event received')
+        validation_code = event_data["validationCode"]
+        logging.info(f"Validating EventGrid subscription with code: {validation_code}")
+        return {
+            "validationResponse": validation_code
+        }
+    
+    if event_type == "Microsoft.Communication.IncomingCall":
+        logging.info('Incoming call event received')
+        call_automation_client = azCall.CallAutomationClient.from_connection_string(acsConnectionString)
+        logging.info(f'Created call_automation_client')
+        call_connection = answerCall(event_data.get("incomingCallContext"), call_automation_client)
+        logging.info(f'Event data: {event_data}')
+        logging.info('Successfully answered call')
+        recordCall(event_data, call_connection, call_automation_client)
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Webhook triggered")
 
-def answerCall(incomingCallContext, call_automation_client):
+def answerCall(incomingCallContext, call_automation_client: azCall.CallAutomationClient):
     logging.info("Ran function answerCall")
     try:
-        call_connection=call_automation_client.answer_call(incoming_call_context=incomingCallContext, callback_url=callback_uri)
-        logging.info(f'Answered call with ID: {call_connection.source_caller_id_number}')
+        call_connection = call_automation_client.answer_call(incoming_call_context=incomingCallContext, callback_url=callback_uri)
+        logging.info(f'Answered call with ID: {call_connection.call_connection_id}')
         return call_connection
     except Exception as e:
-        logging.error(f"Error recieving call.")
+        logging.error(f"Error recieving call: {e}")
 
-def audioTest(call_automation_client, call_connection):
+
+def wait_for_established(call_connection_client, max_retries=10, delay=1):
+    for _ in range(max_retries):
+        call_properties = call_connection_client.get_call_properties()
+        if call_properties.call_connection_state == "connected":
+            return True
+        time.sleep(delay)
+    return False
+
+def audioTest(call_automation_client: azCall.CallAutomationClient, call_connection):
     try:
-        play_source = azCall.FileSource("https://stfeilmelding001.blob.core.windows.net/audio-for-playback/Recording.wav")
-        logging.info(f"Found sound source from storage account: {play_source}")
-        call_connection_client=call_automation_client.get_call_connection(call_connection_id=call_connection.call_connection_id)
+        sas_token = "sp=r&st=2025-05-02T01:25:03Z&se=2025-05-31T09:25:03Z&spr=https&sv=2024-11-04&sr=c&sig=WYE2D%2BxK1BDatTP9Dsr%2FTWxTIy2YrASTB8kJY8i0nwM%3D"
+        play_source = azCall.FileSource("https://stfeilmelding001.blob.core.windows.net/audio-for-playback/Recording.wav" + "?" + sas_token)
+        logging.info(f"Found sound source from storage account: {play_source.url}")
+        call_connection_client = call_automation_client.get_call_connection(call_connection_id=call_connection.call_connection_id)
         logging.info(f"Created call_connection_client: {call_connection_client}")
+        if not wait_for_established(call_connection_client):
+            logging.error("Call did not reach Established state in time.")
+            return
+
         call_connection_client.play_media_to_all(
             play_source=play_source,
             operation_callback_url=callback_uri)
 
     except Exception as e:
-        logging.error("Error in AudioTest-function")
+        logging.error(f"Error in AudioTest-function: {e}")
 
-def recordCall(event_data, call_connection):
+
+def recordCall(event_data: dict, call_connection, call_automation_client: azCall.CallAutomationClient):
     logging.info('Started running recordCall-function')
     incomingCallContext=event_data.get("incomingCallContext")
+    audioTest(call_automation_client, call_connection)  
     try:
-        call_automation_client = azCall.CallAutomationClient.from_connection_string(acsConnectionString)
-        # call_connection=call_automation_client.answer_call(incoming_call_context=incomingCallContext, callback_url=callback_uri)
-        serverCallId=call_connection.server_call_id
+        serverCallId = call_connection.server_call_id
         logging.info(f'Server Call ID: {serverCallId}')
-        # response = call_automation_client.start_recording(server_call_id=serverCallId, 
-        #     recording_state_callback_url=callback_uri,
-        #     recording_content_type = azCall.RecordingContent.Audio,
-        #     recording_channel_type = azCall.RecordingChannel.Unmixed,
-        #     recording_format_type = azCall.RecordingFormat.Mp3,
-            
-        #     # recording_storage = azCall.AzureBlobContainerRecordingStorage(container_url="https://stfeilmelding001.blob.core.windows.net/opptaker")
-        #     )
-        # logging.info(f'Recording ID: {response.recording_id}')
-        play_source = azCall.FileSource("https://stfeilmelding001.blob.core.windows.net/audio-for-playback/Recording.wav")
-        call_automation_client.get_call_connection(call_connection_id=call_connection.call_connection_id).play_media_to_all(
-            play_source=play_source
+        sas_token = "sp=r&st=2025-05-02T11:18:32Z&se=2025-05-31T19:18:32Z&spr=https&sv=2024-11-04&sr=c&sig=%2FhL16YidcCLRYCkH%2FEDBcCBz3CRfpcKjQwHgoP66gqs%3D"
+        response = call_automation_client.start_recording(
+            server_call_id=serverCallId, 
+            recording_state_callback_url=callback_uri,
+            recording_content_type = azCall.RecordingContent.AUDIO,
+            recording_channel_type = azCall.RecordingChannel.UNMIXED,
+            recording_format_type = azCall.RecordingFormat.MP3,
         )
+        recording_storage = "https://stfeilmelding001.blob.core.windows.net/opptaker" + "?" + sas_token
+        logging.info(f'Recording ID: {response.recording_id}')
         # max_tones_to_collect = 5
         # dtmf_recognize=call_automation_client.get_call_connection(call_connection.call_connection_id).start_recognizing_media( 
         #     dtmf_max_tones_to_collect=max_tones_to_collect, 
@@ -97,4 +120,4 @@ def recordCall(event_data, call_connection):
 
 
     except Exception as e:
-        logging.error(f"Error recieving call.")
+        logging.error(f"Error recording call: {e}")

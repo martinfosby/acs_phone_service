@@ -1,0 +1,22 @@
+[
+    {
+      "id": "12345",
+      "eventType": "Microsoft.Storage.BlobCreated",
+      "subject": "/blobServices/default/containers/testcontainer/blobs/test.txt",
+      "eventTime": "2025-05-01T15:30:00.000Z",
+      "data": {
+        "api": "PutBlob",
+        "clientRequestId": "abc-123",
+        "requestId": "xyz-789",
+        "eTag": "0x8D4BCC2E4835CD0",
+        "contentType": "text/plain",
+        "contentLength": 524288,
+        "blobType": "BlockBlob",
+        "url": "https://yourstorageaccount.blob.core.windows.net/testcontainer/test.txt"
+      },
+      "dataVersion": "",
+      "metadataVersion": "1",
+      "topic": "/subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.Storage/storageAccounts/{storage-account}"
+    }
+  ]
+  
