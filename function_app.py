@@ -5,6 +5,8 @@ from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 import time
 import azure.core.exceptions as azexceptions
+import json
+
 import http.client as http_client
 http_client.HTTPConnection.debuglevel = 1
 logging.getLogger("azure").setLevel(logging.DEBUG)
@@ -25,15 +27,16 @@ app_retrieved_secret = client.get_secret(app_secret_name)
 
 acsConnectionString = acs_retrieved_secret.value
 
-# callback_uri = app_retrieved_secret.id
+# callback_url = app_retrieved_secret.value
 # callback_uri = "http://127.0.0.1:5000/callback"
-callback_uri = "https://a0de-88-92-77-94.ngrok-free.app/callback"
+# callback_uri = "https://a0de-88-92-77-94.ngrok-free.app/callback"
+callback_url = "https://opptak-t-bachelor2025.azurewebsites.net/api/callback"
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.event_grid_trigger(arg_name="event")
-@app.function_name(name="EventGridTrigger")
-def EventGridTrigger(event: func.EventGridEvent): 
+@app.function_name(name="PhoneRecordEventGridTrigger")
+def phone_record_event_grid_trigger(event: func.EventGridEvent): 
     logging.info('Python EventGrid trigger processed an event')
     event_data = event.get_json()
     event_type = event.event_type
@@ -56,13 +59,13 @@ def EventGridTrigger(event: func.EventGridEvent):
         logging.info('Successfully answered call')
         recordCall(event_data, call_connection, call_automation_client)
 
-def main(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info("Webhook triggered")
+
+
 
 def answerCall(incomingCallContext, call_automation_client: azCall.CallAutomationClient):
     logging.info("Ran function answerCall")
     try:
-        call_connection = call_automation_client.answer_call(incoming_call_context=incomingCallContext, callback_url=callback_uri)
+        call_connection = call_automation_client.answer_call(incoming_call_context=incomingCallContext, callback_url=callback_url)
         logging.info(f'Answered call with ID: {call_connection.call_connection_id}')
         return call_connection
     except Exception as e:
@@ -92,7 +95,7 @@ def audioTest(call_automation_client: azCall.CallAutomationClient, call_connecti
 
         call_connection_client.play_media_to_all(
             play_source=play_source,
-            operation_callback_url=callback_uri)
+            operation_callback_url=callback_url)
 
     except Exception as e:
         logging.error(f"Error in AudioTest-function: {e}")
@@ -113,7 +116,7 @@ def recordCall(event_data: dict, call_connection: azCall.CallConnectionPropertie
         try:
             response = call_automation_client.start_recording(
                 server_call_id=serverCallId,
-                recording_state_callback_url=callback_uri,
+                recording_state_callback_url=callback_url,
                 recording_content_type=azCall.RecordingContent.AUDIO,
                 recording_channel_type=azCall.RecordingChannel.UNMIXED,
                 recording_format_type=azCall.RecordingFormat.WAV,
@@ -130,19 +133,37 @@ def recordCall(event_data: dict, call_connection: azCall.CallConnectionPropertie
             logging.error(traceback.format_exc())
 
         logging.info(f'Recording ID: {response.recording_id}')
-        # recording_properties = call_automation_client.get_recording_properties(response.recording_id)
-        # recording_download_url = call_automation_client.download_recording(recording_id=response.recording_id, destination_path="output.wav")
-        # max_tones_to_collect = 5
-        # dtmf_recognize=call_automation_client.get_call_connection(call_connection.call_connection_id).start_recognizing_media( 
-        #     dtmf_max_tones_to_collect=max_tones_to_collect, 
-        #     input_type=azCall.RecognizeInputType.DTMF, 
-        #     target_participant=azCall.target_participant, 
-        #     initial_silence_timeout=30,  
-        #     dtmf_inter_tone_timeout=5, 
-        #     interrupt_prompt=True, 
-        #     dtmf_stop_tones=[ azCall.DtmfTone.Pound ])
-        # logging.info("Start recognizing")
+
+        max_tones_to_collect = 5
+        dtmf_recognize = call_automation_client.get_call_connection(call_connection.call_connection_id).start_recognizing_media( 
+            dtmf_max_tones_to_collect=max_tones_to_collect, 
+            input_type=azCall.RecognizeInputType.DTMF, 
+            target_participant=azCall.target_participant, 
+            initial_silence_timeout=30,  
+            dtmf_inter_tone_timeout=5, 
+            interrupt_prompt=True, 
+            dtmf_stop_tones=[ azCall.DtmfTone.Pound ])
+        logging.info("Start recognizing")
 
 
     except Exception as e:
         logging.error(f"Error recording call: {e}")
+
+@app.route(route="callback", auth_level=func.AuthLevel.ANONYMOUS)
+@app.function_name(name="Callback")
+def callback(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('ACS callback triggered.')
+    try:
+        data = req.get_json()
+        logging.info(f"Received event: {json.dumps(data)}")
+
+        event_type = data[0].get("eventType")
+        if event_type == "RecognizeCompleted":
+            tones = data.get("recognitionResult", {}).get("tones")
+            logging.info(f"DTMF Tones: {tones}")
+            # process tones here
+
+        return func.HttpResponse("Event received", status_code=200)
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        return func.HttpResponse("Error processing event", status_code=500)
