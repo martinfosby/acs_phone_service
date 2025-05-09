@@ -27,7 +27,7 @@
             "label": "kill-process-on-7071",
             "type": "shell",
 			"windows": {
-				"command": "powershell -Command \"Get-NetTCPConnection -LocalPort 7071 | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ }\"",
+				"command": "powershell -Command \"Get-NetTCPConnection -LocalPort 7071 | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ }\""
 			},
             "problemMatcher": [],
             "dependsOn": "func: host start",
