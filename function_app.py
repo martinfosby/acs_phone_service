@@ -13,6 +13,8 @@ from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from datetime import datetime, timedelta, timezone
 from azure.core.exceptions import ResourceNotFoundError
 
+from CallAutomationSingleton import CallAutomationSingleton
+
 start_time = datetime.now(timezone.utc)
 expiry_time = start_time + timedelta(days=1)
 
@@ -35,11 +37,12 @@ secret_client = SecretClient(vault_url=kv_uri, credential=credential)
 acs_retrieved_secret = secret_client.get_secret(acs_secret_name)
 app_retrieved_secret = secret_client.get_secret(app_secret_name)
 storage_retrieved_secret = secret_client.get_secret(storage_secret_name)
-# callback_url_retrieved_secret = secret_client.get_secret(callback_secret_name)
+callback_url_retrieved_secret = secret_client.get_secret(callback_secret_name)
 
 acs_connection_string = acs_retrieved_secret.value
 
-callback_url = os.environ.get("CALLBACK_URL")
+# callback url needs to be a public endpoint via https, e.g. Azure Function, or ngrok for local development
+callback_url = os.environ.get("CALLBACK_URL") or callback_url_retrieved_secret.value # test first for env var, then for secret. Useful for local development
 
 # Global variable to store the CallAutomationClient
 call_automation_client = None
@@ -66,7 +69,7 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
     
     if event_type == "Microsoft.Communication.IncomingCall":
         logging.info('Incoming call event received')
-        call_automation_client = get_call_automation_client()
+        call_automation_client = CallAutomationSingleton.get_instance(acs_connection_string)
         logging.info(f'Created call_automation_client {call_automation_client}')
         call_connection_properties = answer_call(event_data.get("incomingCallContext"), call_automation_client)
         logging.info(f'Caller information: {call_connection_properties.answered_for.raw_id}')
@@ -155,8 +158,8 @@ def get_call_connection_client(call_connection_id: str, call_automation_client: 
         raise
 
 
-def audio_playback(call_connection_client: az_call.CallConnectionClient):
-    blob_client = get_blob_service_client("audio-for-playback", "Recording.wav")
+def audio_playback(call_connection_client: az_call.CallConnectionClient, container_name: str = "audio-for-playback", blob_name: str = "Recording.wav"):
+    blob_client = get_blob_service_client(container_name=container_name, blob_name=blob_name)
     logging.info(f"Blob client created: {blob_client}")        
     # Get the blob URL - no SAS token needed now
     blob_url = blob_client.url
@@ -206,17 +209,28 @@ def create_service_sas_blob(blob_service_client: BlobServiceClient, account_key:
     return sas_token
 
 
-def record_call(call_connection: az_call.CallConnectionProperties, call_automation_client: az_call.CallAutomationClient):
+def record_call(input_server_call_id: str, call_automation_client: az_call.CallAutomationClient):
+    """
+    Starts recording the call using the CallAutomationClient instance and the call connection properties.
+    The recording is stored in an Azure Blob Storage container.
+    Use Microsoft.Communication.RecordingFileStatusUpdated event to get the recording details, it's gets triggered when the recording is finished.
+    Args:
+        call_connection: The call connection properties.
+        call_automation_client: The CallAutomationClient instance.
+
+    Returns:
+        None
+    """
     logging.info('Started running recordCall-function')
     try:
-        serverCallId = call_connection.server_call_id
-        logging.info(f'Server Call ID: {serverCallId}')
+        logging.info(f'Server Call ID: {input_server_call_id}')
         blob_container_url = "https://stfeilmelding001.blob.core.windows.net/opptaker"
 
-        # Start recording with direct parameter specification
+        # Start recording with direct parameter specification.
+        # Note: mp3 must use the mixed channel type, for wav you can use both.
         try:
             response = call_automation_client.start_recording(
-                server_call_id=serverCallId,
+                server_call_id=input_server_call_id,
                 recording_state_callback_url=callback_url,
                 recording_content_type=az_call.RecordingContent.AUDIO,
                 recording_channel_type=az_call.RecordingChannel.MIXED,
@@ -303,8 +317,12 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                 call_connection_id = event.get("data").get("callConnectionId")
                 logging.info(f"Call is now connected. ID: {call_connection_id}")
 
-                # Create a new CallAutomationClient
-                call_automation_client = get_call_automation_client()
+                try:
+                    # Get call automation singleton instance
+                    call_automation_client = CallAutomationSingleton.get_instance(acs_connection_string)
+                    logging.info(f'Created call_automation_client after PlayCompleted: {call_automation_client}')
+                except Exception as e:
+                    logging.error(f"Failed to create CallAutomationClient after PlayCompleted: {e}")
 
                 # Create a new CallConnectionClient
                 try:
@@ -315,46 +333,65 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
                 # Start audio playback
                 try:
-                    audio_playback(call_connection_client)
+                    audio_playback(call_connection_client, container_name="audio-for-playback", blob_name="combined.wav")
                 except Exception as e:
                     logging.error(f"Failed to start audio playback after CallConnected: {e}")
+                
+                 # Start continuous DTMF recognition
+                try:
+                    start_continous_dtmf_recognition(call_connection_client)
+                except Exception as e:
+                    logging.error(f"Failed to start continuous DTMF recognition after CallConnected: {e}")
+
                 # # Start DTMF recognition
                 # try:
                 #     recognize_dtmf(call_connection_client)
                 # except Exception as e:
                 #     logging.error(f"Failed to start DTMF recognition after CallConnected: {e}")
 
-                # Start continuous DTMF recognition
+
+            elif event_type == "Microsoft.Communication.PlayCompleted":
+                logging.info('PlayCompleted event received')
+                operation_context = event.get("operationContext")
+                logging.info(f"Play operation completed with context: {operation_context}")
+                
                 try:
-                    start_continous_dtmf_recognition(call_connection_client)
+                    # Get call automation singleton instance
+                    call_automation_client = CallAutomationSingleton.get_instance(acs_connection_string)
+                    logging.info(f'Created call_automation_client after PlayCompleted: {call_automation_client}')
                 except Exception as e:
-                    logging.error(f"Failed to start continuous DTMF recognition after CallConnected: {e}")
+                    logging.error(f"Failed to create CallAutomationClient after PlayCompleted: {e}")
 
                 try:
                     logging.info(f"Running record call")
                     # Start recording
-                    record_call(call_connection_client.get_call_properties(), call_automation_client)
+                    record_call(event.get("data").get("serverCallId"), call_automation_client)
                 except Exception as e:
                     logging.error(f"Failed to start recording after CallConnected: {e}")
             
             elif event_type == "Microsoft.Communication.ContinuousDtmfRecognitionToneReceived":
-                logging.info('ContinuousDtmfRecognitionToneReceived event received')
-                logging.info(f"DTMF data: {event.get("data")}")
+                try:
+                    logging.info('ContinuousDtmfRecognitionToneReceived event received')
+                    logging.info(f"DTMF data: {event.get("data")}")
 
-                # process tones here
-                dtmf_tones.append(event.get("data").get("tone"))
+                    # process tones here
+                    dtmf_tones.append(event.get("data").get("tone"))
+                except Exception as e:
+                    logging.error(f"Error processing ContinuousDtmfRecognitionToneReceived event: {e}")
                 
             elif event_type == "Microsoft.Communication.ContinuousDtmfRecognitionStopped":
-                logging.info('ContinuousDtmfRecognitionStopped event received')
-                logging.info(f"DTMF tones: {dtmf_tones}")
-                blob_service_client = get_blob_service_client("ansattnr-fra-telefon", event.get("data").get("callConnectionId") + f"{datetime.now().strftime('%Y-%m-%d')}.txt")
-                blob_client = blob_service_client.get_blob_client()
-                blob_client.upload_blob(
-                    data=dtmf_tones,
-                    blob_type="AppendBlob",
-                    overwrite=True
-                )
-
+                try:
+                    logging.info('ContinuousDtmfRecognitionStopped event received')
+                    logging.info(f"DTMF tones: {dtmf_tones}")
+                    blob_service_client = get_blob_service_client("ansattnr-fra-telefon", event.get("data").get("callConnectionId") + f"{datetime.now().strftime('%Y-%m-%d')}.txt")
+                    blob_client = blob_service_client.get_blob_client()
+                    blob_client.upload_blob(
+                        data=dtmf_tones,
+                        blob_type="AppendBlob",
+                        overwrite=True
+                    )
+                except Exception as e:
+                    logging.error(f"Error processing ContinuousDtmfRecognitionStopped event: {e}")
             elif event_type == "Microsoft.Communication.RecordingStateChanged":
                 try:
                     logging.info('RecordingStateChanged event received')
