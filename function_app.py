@@ -52,12 +52,12 @@ call_automation_client = None
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
-# from MockCommunicationIdentityClient import MockCommunicationIdentityClient
-# # Usage (no Azure calls = no cost)
-# client = MockCommunicationIdentityClient()
-# user = client.create_user()
-# token = client.get_token(user, ["voip"])
-# print(f"Mock user: {user.identifier}, token: {token['token']}")
+from MockCommunicationIdentityClient import MockCommunicationIdentityClient
+# Usage (no Azure calls = no cost)
+client = MockCommunicationIdentityClient()
+user = client.create_user()
+token = client.get_token(user, ["voip"])
+print(f"Mock user: {user.identifier}, token: {token['token']}")
 
 
 @app.event_grid_trigger(arg_name="event")
