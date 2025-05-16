@@ -17,36 +17,9 @@ from azure.communication.identity import CommunicationUserIdentifier, Communicat
 from CallAutomationSingleton import CallAutomationSingleton
 from threading import Timer
 from azure.communication.callautomation import CallConnectionProperties
+import asyncio
 
-
-start_time = datetime.now(timezone.utc)
-expiry_time = start_time + timedelta(days=1)
-
-# import http.client as http_client
-# http_client.HTTPConnection.debuglevel = 1
-# logging.getLogger("azure").setLevel(logging.DEBUG)
-# logging.getLogger("urllib3").setLevel(logging.DEBUG)
-
-
-key_vault_name = "keyvault-t-bachelor2025"
-kv_uri = f"https://{key_vault_name}.vault.azure.net"
-acs_secret_name = "communicationServicesBachelor"
-app_secret_name= "webhookOpptakApp"
-callback_secret_name = "callback-url-fa-http-trigger"
-sas_secret_name = "sas-token-acs"
-storage_secret_name = "stfeilmelding001-account-key"
-credential = DefaultAzureCredential()
-secret_client = SecretClient(vault_url=kv_uri, credential=credential)
-
-acs_retrieved_secret = secret_client.get_secret(acs_secret_name)
-app_retrieved_secret = secret_client.get_secret(app_secret_name)
-storage_retrieved_secret = secret_client.get_secret(storage_secret_name)
-callback_url_retrieved_secret = secret_client.get_secret(callback_secret_name)
-
-acs_connection_string = acs_retrieved_secret.value
-
-# callback url needs to be a public endpoint via https, e.g. Azure Function, or ngrok for local development
-callback_url = os.environ.get("CALLBACK_URL") or callback_url_retrieved_secret.value # test first for env var, then for secret. Useful for local development
+from config import *
 
 
 def get_call_connection_client(call_connection_id: str, call_automation_client: az_call.CallAutomationClient) -> az_call.CallConnectionClient:
@@ -453,3 +426,14 @@ def upload_interpret_dtmf(call_data: dict, call_properties: CallConnectionProper
         
         except Exception as e:
             logging.error(f"Error uploading blob in RecognizeCompleted event: {e}")
+
+
+def cleanup_call(running_tasks, call_connection_id):
+    tasks = running_tasks.get(call_connection_id)
+    if tasks:
+        for task in tasks:
+            try:
+                asyncio.get_event_loop().run_until_complete(task)
+            except asyncio.CancelledError:
+                logging.info(f"Task for call {call_connection_id} cancelled successfully")
+            del running_tasks[call_connection_id]

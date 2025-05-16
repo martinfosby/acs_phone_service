@@ -1,25 +1,20 @@
-import json
 import logging
 import os
 import azure.functions as func
-import azure.communication.callautomation as az_call
-from azure.keyvault.secrets import SecretClient
-from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient, BlobClient, UserDelegationKey
-import time
-import azure.core.exceptions as azexceptions
 import requests
-from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from azure.core.credentials import AzureKeyCredential
-from datetime import datetime, timedelta, timezone
-from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ClientAuthenticationError
-from azure.communication.identity import CommunicationUserIdentifier, CommunicationIdentityClient, PhoneNumberIdentifier
+from datetime import datetime, timezone
+from azure.communication.identity import CommunicationIdentityClient
 from CallAutomationSingleton import CallAutomationSingleton
-from threading import Timer
-from azure.communication.callautomation import CallConnectionProperties
+from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
+import asyncio
 
 # user functions
 from utility import *
+from config import *
+
+running_tasks = {}  # global or class-level dict
+
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -92,34 +87,36 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                 call_connection_id = event.get("data").get("callConnectionId")
                 logging.info(f"Call is now connected. ID: {call_connection_id}")
 
-                try:
-                    # Get call automation singleton instance
-                    call_automation_client = CallAutomationSingleton.get_instance(acs_connection_string)
-                    logging.info(f'Created call_automation_client after PlayCompleted: {call_automation_client}')
-                except Exception as e:
-                    logging.error(f"Failed to create CallAutomationClient after PlayCompleted: {e}")
+                # Configure the call automation client
+                AsyncCallAutomationSingleton.configure(acs_connection_string)
+                
+                async def handle_connection():
+                    logging.info('Started handling connection asynchronously')
+                    try:
+                        dtmf_task = asyncio.create_task(
+                            AsyncCallAutomationSingleton.start_continous_dtmf_recognition(
+                                call_connection_id=call_connection_id,
+                                operation_context="call-app-continuous-dtmf"
+                            )
+                        )
+                        audio_task = asyncio.create_task(
+                            AsyncCallAutomationSingleton.audio_playback_to_all(
+                                call_connection_id=call_connection_id,
+                                operation_context="instruksjoner",
+                                callback_url=callback_url,
+                                container_name="audio-for-playback",
+                                blob_name="instruksjoner.wav"
+                            )
+                        )
+                        running_tasks[call_connection_id] = [dtmf_task, audio_task]
+                        # Wait for both tasks to complete
+                        await asyncio.gather(dtmf_task, audio_task)
 
-                # Create a new CallConnectionClient
-                try:
-                    call_connection_client = call_automation_client.get_call_connection(call_connection_id=call_connection_id)
-                    logging.info(f"Call connection client created: {call_connection_client}")
-                except Exception as e:
-                    logging.error(f"Failed to create CallConnectionClient after CallConnected: {e}")
+                        logging.info('Started continuous DTMF recognition and audio playback')
+                    except Exception as e:
+                        logging.error(f"Error during handling connection: {e}")
 
-                try:
-                    start_continous_dtmf_recognition(call_connection_client, operation_context="call-app-continuous-dtmf")
-                    logging.info('Started continuous DTMF recognition')
-                except Exception as e:
-                    logging.error(f"Failed to start continuous DTMF recognition after RecognizeCompleted: {e}")
-                    
-                try:
-                    audio_playback_to_all(call_connection_client, 
-                                          operation_context="instruksjoner",
-                                          callback_url=callback_url,
-                                          container_name="audio-for-playback", 
-                                          blob_name="instruksjoner.wav")
-                except Exception as e:
-                    logging.error(f"Failed to start audio playback after CallConnected: {e}")
+                asyncio.run(handle_connection())
                 
 
             

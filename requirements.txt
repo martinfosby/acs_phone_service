@@ -11,3 +11,6 @@ azure-storage-blob==12.25.1
 
 # development
 azure-communication-identity
+
+# async support
+aiohttp
