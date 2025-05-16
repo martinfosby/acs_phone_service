@@ -329,7 +329,11 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                     call_id = event.get("data").get("callConnectionId")
                     logging.info(f"Call disconnected with ID: {call_id}")
 
-
+                    tasks = running_tasks.get(call_id, [])
+                    if any(not task.done() for task in tasks):
+                        # There are still unfinished tasks for this call
+                        logging.info("Cleaning up async tasks for call...")
+                        cleanup_call(running_tasks, call_id)
                 except Exception as e:
                     logging.error(f"Error processing CallDisconnected event: {e}")
 
