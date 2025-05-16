@@ -3,11 +3,14 @@ import os
 import azure.functions as func
 import requests
 from azure.core.credentials import AzureKeyCredential
+from azure.core.exceptions import ResourceExistsError
 from datetime import datetime, timezone
 from azure.communication.identity import CommunicationIdentityClient
 from CallAutomationSingleton import CallAutomationSingleton
 from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
 import asyncio
+from azure.storage.blob import ContentSettings
+import globals
 
 # user functions
 from utility import *
@@ -15,7 +18,6 @@ from config import *
 
 running_tasks = {}  # global or class-level dict
 callback_url = os.getenv("CALLBACK_URL")
-
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -48,6 +50,34 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
 
     if event_type == "Microsoft.Communication.RecordingFileStatusUpdated":
         logging.info('Recording file status updated event received')
+        logging.info("Uploading recording to blob storage...")
+        blob_service_client = BlobServiceClient(
+            account_url="https://stfeilmelding001.blob.core.windows.net", 
+            credential=default_credential if os.getenv("CLOUD_ENV") == "azure" else named_key_credential)
+        
+        container_name = "recording-and-call-data"
+        try:
+            container_client = blob_service_client.create_container(name=container_name)
+        except ResourceExistsError:
+            logging.info("Container already exists")
+
+        blob_client: BlobClient = blob_service_client.get_blob_client(container=container_name, blob=event_data.get("recordingId") + ".json")
+        
+        recording_data_and_call_data = {
+            **event_data,
+            **globals.call_data
+        }
+
+        blob_client.upload_blob(
+            json.dumps(recording_data_and_call_data, indent=4),
+            metadata={
+                "processed": "false",
+                "language": "nb-NO",
+                "priority": "high",
+                "transcribed": "false"
+            },
+            content_settings=ContentSettings(content_type='application/json')
+        )
         try:
             res = requests.post("http://127.0.0.1:5000/webhook", json=event_data)
             logging.info(f"Webhook response: {res.status_code}, {res.text}")
@@ -90,18 +120,22 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
                 # Configure the call automation client
                 AsyncCallAutomationSingleton.configure(acs_connection_string)
+
                 
                 async def handle_connection():
+                    client = AsyncCallAutomationSingleton.get_new_client()
                     logging.info('Started handling connection asynchronously')
                     try:
                         dtmf_task = asyncio.create_task(
                             AsyncCallAutomationSingleton.start_continous_dtmf_recognition(
+                                client=client,
                                 call_connection_id=call_connection_id,
                                 operation_context="call-app-continuous-dtmf"
                             )
                         )
                         audio_task = asyncio.create_task(
                             AsyncCallAutomationSingleton.audio_playback_to_all(
+                                client=client,
                                 call_connection_id=call_connection_id,
                                 operation_context="instruksjoner",
                                 callback_url=callback_url,
@@ -116,6 +150,8 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                         logging.info('Started continuous DTMF recognition and audio playback')
                     except Exception as e:
                         logging.error(f"Error during handling connection: {e}")
+                    finally:
+                        await client.close()
 
                 # Instead of asyncio.run(handle_connection()), schedule the coroutine in the current loop:
                 try:
@@ -143,23 +179,29 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                 tones = dtmf_result.get("tones")
                 logging.info(f"DTMF Tones: {tones}")
                 
-                call_connection_client = CallAutomationSingleton.get_call_connection_client(event.get("data").get("callConnectionId"))
-        
-                # Start audio playback
-                try:
-                    audio_playback_to_all(call_connection_client, 
-                                          operation_context="denne-samtalen-blir-tatt-opp-deretter-transkribert",
-                                          callback_url=callback_url,
-                                          container_name="audio-for-playback", 
-                                          blob_name="denne-samtalen-blir-tatt-opp-deretter-transkribert.wav")
-                except Exception as e:
-                    logging.error(f"Failed to start audio playback after RecognizeCompleted: {e}")
+                if operation_context == "recognize-employee-id":
+                    call_connection_client = CallAutomationSingleton.get_call_connection_client(event.get("data").get("callConnectionId"))
+            
+                    # Start audio playback
+                    try:
+                        audio_playback_to_all(call_connection_client, 
+                                            operation_context="denne-samtalen-blir-tatt-opp-deretter-transkribert",
+                                            callback_url=callback_url,
+                                            container_name="audio-for-playback", 
+                                            blob_name="denne-samtalen-blir-tatt-opp-deretter-transkribert.wav")
+                    except Exception as e:
+                        logging.error(f"Failed to start audio playback after RecognizeCompleted: {e}")
 
-                call_properties = call_connection_client.get_call_properties()
-                logging.info(f"Call properties: {call_properties}")
 
-                call_data = interpret_dtmf(tones, operation_context, call_properties)
-                upload_interpret_dtmf(call_data=call_data, call_properties=call_properties)
+                    call_properties = call_connection_client.get_call_properties()
+                    logging.info(f"Call properties: {call_properties}")
+
+                    try:
+                        call_data = interpret_dtmf(tones, call_properties)
+                        globals.call_data = call_data
+                        upload_interpret_dtmf(call_data=call_data, call_properties=call_properties)
+                    except Exception as e:
+                        logging.error(f"Failed to interpret DTMF: {e}")
 
             elif event_type == "Microsoft.Communication.RecognizeFailed":
                 logging.info('RecognizeFailed event received')
@@ -249,7 +291,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
                             #     except Exception as e:
                             #         logging.error(f"Failed to start audio playback after tast to dtmf: {e}")
-                            
+
                     except Exception as e:
                         logging.error(f"Failed to start audio playback after ContinuousDtmfRecognitionToneReceived: {e}")
 
@@ -276,13 +318,13 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                             logging.error(f"Failed to start audio playback after tast to dtmf: {e}")
 
                     case "denne-samtalen-blir-tatt-opp-deretter-transkribert":
-                        call_connection_client = CallAutomationSingleton.get_call_connection_client(event.get("data").get("callConnectionId"))
-                        try:
-                            recording_properties = CallAutomationSingleton.record_call(input_server_call_id=event.get("data").get("serverCallId"), 
-                                                                                    pause_on_start=False, callback_url=callback_url)
-                            logging.info(f"Recording properties: {recording_properties}")
-                        except Exception as e:
-                            logging.error(f"Failed to start recording after CallConnected: {e}")
+                        recording_properties = CallAutomationSingleton.record_call(input_server_call_id=event.get("data").get("serverCallId"), 
+                                                                                pause_on_start=False, callback_url=callback_url)
+                        logging.info(f"Recording properties: {recording_properties}")
+
+                        # Start a background thread to stop the recording later
+                        recording_id = recording_properties.recording_id
+                        threading.Thread(target=stop_recording_after_delay, args=(recording_id, 180)).start()
 
                     case "denne-samtalen-blir-transkribert-i-sanntid":
                         call_connection_client = CallAutomationSingleton.get_call_connection_client(event.get("data").get("callConnectionId"))

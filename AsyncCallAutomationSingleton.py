@@ -11,6 +11,7 @@ from config import callback_url
 class AsyncCallAutomationSingleton:
     _instance = None
     _acs_connection_string = None
+    _instances = []
 
     @classmethod
     def configure(cls, acs_connection_string: str):
@@ -30,7 +31,9 @@ class AsyncCallAutomationSingleton:
     def get_new_client(cls) -> aio_az_call.CallAutomationClient:
         if not cls._acs_connection_string:
             raise ValueError("ACS connection string not configured")
-        return AioCallAutomationClient.from_connection_string(cls._acs_connection_string)
+        aio_call_automation_client = AioCallAutomationClient.from_connection_string(cls._acs_connection_string)
+        cls._instances.append(aio_call_automation_client)
+        return aio_call_automation_client
 
     @classmethod
     async def get_call_connection_client(cls, call_connection_id) -> aio_az_call.CallConnectionClient:
@@ -38,17 +41,19 @@ class AsyncCallAutomationSingleton:
         return client.get_call_connection(call_connection_id)
 
     @classmethod
-    async def audio_playback_to_all(cls,
-                        call_connection_id: str,
-                        operation_context: str, 
-                        loop: bool = False,
-                        interrupt_call_media_operation: bool = True,
-                        callback_url: str = callback_url, 
-                        container_name: str = "audio-for-playback", 
-                        blob_name: str = "instruksjoner.wav", 
-                        generate_sas: bool = True):
+    async def audio_playback_to_all(
+        cls,
+        client: aio_az_call.CallAutomationClient,
+        call_connection_id: str,
+        operation_context: str, 
+        loop: bool = False,
+        interrupt_call_media_operation: bool = True,
+        callback_url: str = callback_url, 
+        container_name: str = "audio-for-playback", 
+        blob_name: str = "instruksjoner.wav", 
+        generate_sas: bool = True
+        ):
         try:
-            client = cls.get_new_client()
             call_connection_client = client.get_call_connection(call_connection_id)
             logging.info("Retrieving audio file source")
             play_source = return_file_source_with_sas_token(container_name=container_name, blob_name=blob_name, generate_sas=generate_sas)
@@ -62,12 +67,10 @@ class AsyncCallAutomationSingleton:
             )
         except Exception as e:
             logging.error(f"Unexpected error in audio_playback_to_all-function: {e}")
-        finally:
-            await client.close()  # close underlying session/resources
+        
 
     @classmethod
-    async def start_continous_dtmf_recognition(cls, call_connection_id: str, operation_context: str):
-        client = cls.get_new_client()
+    async def start_continous_dtmf_recognition(cls, client: aio_az_call.CallAutomationClient, call_connection_id: str, operation_context: str):
         call_connection_client = client.get_call_connection(call_connection_id)
         logging.info('Started running start_continous_dtmf_recognition-function')
         try:

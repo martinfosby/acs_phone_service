@@ -1,11 +1,13 @@
 import json
 import logging
 import os
+from shlex import join
 import azure.functions as func
 import azure.communication.callautomation as az_call
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, BlobClient, UserDelegationKey
+import threading
 import time
 import azure.core.exceptions as azexceptions
 import requests
@@ -15,11 +17,11 @@ from datetime import datetime, timedelta, timezone
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ClientAuthenticationError
 from azure.communication.identity import CommunicationUserIdentifier, CommunicationIdentityClient, PhoneNumberIdentifier
 from CallAutomationSingleton import CallAutomationSingleton
-from threading import Timer
 from azure.communication.callautomation import CallConnectionProperties
 import asyncio
 
 from config import *
+from CallAutomationSingleton import CallAutomationSingleton
 
 
 def get_call_connection_client(call_connection_id: str, call_automation_client: az_call.CallAutomationClient) -> az_call.CallConnectionClient:
@@ -57,7 +59,7 @@ def get_blob_client_from_blob_service_client(container_name: str, blob_name: str
     # Connect to your storage account
     blob_service_client = BlobServiceClient(
         account_url="https://stfeilmelding001.blob.core.windows.net",
-        credential=credential
+        credential=default_credential if os.getenv("CLOUD_ENV") == "azure" else named_key_credential,
     )
 
     # Get a reference to the container
@@ -68,11 +70,18 @@ def get_blob_client_from_blob_service_client(container_name: str, blob_name: str
     return blob_client
 
 
-# def trigger_if_call_still_active(call_id):
-#     # Check if the call is still active (e.g., in a dict or via API)
-#     if call_id in call_start_times:
-#         print(f"Call {call_id} is still active after 60 seconds. Triggering event.")
-#         # Call your logic here: notify, emit event, etc.
+
+
+def stop_recording_after_delay(recording_id, delay_seconds=180):
+    time.sleep(delay_seconds)
+    try:
+        CallAutomationSingleton.get_instance().stop_recording(recording_id)
+        print(f"Recording {recording_id} stopped after {delay_seconds} seconds.")
+    except Exception as e:
+        print(f"Failed to stop recording: {e}")
+
+
+
 
 
 def return_file_source_with_sas_token(container_name: str, blob_name: str, generate_sas: bool = True, delegation_key: bool | None = None):
@@ -102,7 +111,7 @@ def return_file_source_with_sas_token(container_name: str, blob_name: str, gener
             # Try with delegation key
             start_time = datetime.now(timezone.utc)
             expiry_time = start_time + timedelta(hours=2)
-            del_key = get_delegation_key(BlobServiceClient(account_url="https://stfeilmelding001.blob.core.windows.net", credential=credential), 
+            del_key = get_delegation_key(BlobServiceClient(account_url="https://stfeilmelding001.blob.core.windows.net", credential=default_credential), 
                                             start_time=start_time, 
                                             expiry_time=expiry_time)
 
@@ -346,28 +355,45 @@ def stop_continous_dtmf_recognition(
 
 
 
-def interpret_dtmf(tones, operation_context, call_properties: CallConnectionProperties):
+def interpret_dtmf(tones, call_properties: CallConnectionProperties):
     tones_to_interpret = {
-            "zero": 0,
-            "one": 1,
-            "two": 2,
-            "three": 3,
-            "four": 4,
-            "five": 5,
-            "six": 6,
-            "seven": 7,
-            "eight": 8,
-            "nine": 9,
-        }
+        "zero": "0",
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
+    }
 
     # Check if the result information is from maximum number of tones
-    if len(tones) == 5 and operation_context == "employee-id-recognition":
+    if len(tones) == 5:
         logging.info("Maximum number of tones received")
         tones_interpreted = [tones_to_interpret.get(tone) for tone in tones if tone in tones_to_interpret]
         for tone_interpreted in tones_interpreted:
-            if not isinstance(tone_interpreted, int):
+            try:
+                int(tone_interpreted)
+            except ValueError:
                 logging.info(f"Invalid tone received: {tone_interpreted}")
-                return func.HttpResponse(status_code=400)
+                raise ValueError(f"Invalid tone received: {tone_interpreted}")
+        # call_data = {
+        #     "call_connection_id": call_properties.call_connection_id,
+        #     "call_connection_state": call_properties.call_connection_state,
+        #     "callback_url": call_properties.callback_url,
+        #     "correlation_id": call_properties.correlation_id,
+        #     "server_call_id": call_properties.server_call_id,
+        #     "source": call_properties.source.raw_id,
+        #     "source_caller_id_number": call_properties.source_caller_id_number,
+        #     "source_display_name": call_properties.source_display_name,
+        #     "target": ",".join([target.raw_id for target in call_properties.targets]),
+        #     "answered_by": call_properties.answered_by.raw_id if call_properties.answered_by is not None else None,
+        #     "answered_for": call_properties.answered_for.raw_id if call_properties.answered_for is not None else None,
+        #     "tones": ",".join(tones),
+        #     "tones_interpreted": "".join(tones_interpreted),
+        # }
         call_data = {
             "call_connection_id": call_properties.call_connection_id,
             "call_connection_state": call_properties.call_connection_state,
@@ -378,11 +404,12 @@ def interpret_dtmf(tones, operation_context, call_properties: CallConnectionProp
             "source_caller_id_number": call_properties.source_caller_id_number,
             "source_display_name": call_properties.source_display_name,
             "target": [target.raw_id for target in call_properties.targets],
-            "answered_by": call_properties.answered_by.id,
-            "answered_for": call_properties.answered_for.raw_id,
+            "answered_by": call_properties.answered_by.raw_id if call_properties.answered_by is not None else None,
+            "answered_for": call_properties.answered_for.raw_id if call_properties.answered_for is not None else None,
             "tones": tones,
-            "tones_interpreted": tones_interpreted,
+            "tones_interpreted": "".join(tones_interpreted),
         }
+
         return call_data
 
 def upload_interpret_dtmf(call_data: dict, call_properties: CallConnectionProperties):
@@ -397,7 +424,7 @@ def upload_interpret_dtmf(call_data: dict, call_properties: CallConnectionProper
         except HttpResponseError as http_error:
             if http_error.status_code == 403:
                 logging.error(f"Permission denied. Ensure your credentials have write access to the Blob container: {http_error}")
-                del_key = get_delegation_key(BlobServiceClient(account_url="https://stfeilmelding001.blob.core.windows.net", credential=credential), 
+                del_key = get_delegation_key(BlobServiceClient(account_url="https://stfeilmelding001.blob.core.windows.net", credential=default_credential), 
                                                 start_time=datetime.now(timezone.utc), 
                                                 expiry_time=datetime.now(timezone.utc) + timedelta(hours=2))
                 try:
