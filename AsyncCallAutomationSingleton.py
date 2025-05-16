@@ -25,6 +25,12 @@ class AsyncCallAutomationSingleton:
                 else:
                     raise ValueError("No connection string provided")
             return cls._instance
+        
+    @classmethod
+    def get_new_client(cls) -> aio_az_call.CallAutomationClient:
+        if not cls._acs_connection_string:
+            raise ValueError("ACS connection string not configured")
+        return AioCallAutomationClient.from_connection_string(cls._acs_connection_string)
 
     @classmethod
     async def get_call_connection_client(cls, call_connection_id) -> aio_az_call.CallConnectionClient:
@@ -42,8 +48,8 @@ class AsyncCallAutomationSingleton:
                         blob_name: str = "instruksjoner.wav", 
                         generate_sas: bool = True):
         try:
-            logging.info('Retrieving call connection client with ID: ' + call_connection_id)
-            call_connection_client = await cls.get_call_connection_client(call_connection_id=call_connection_id)
+            client = cls.get_new_client()
+            call_connection_client = client.get_call_connection(call_connection_id)
             logging.info("Retrieving audio file source")
             play_source = return_file_source_with_sas_token(container_name=container_name, blob_name=blob_name, generate_sas=generate_sas)
             logging.info('Started running audio_playback_to_all-function')
@@ -56,11 +62,13 @@ class AsyncCallAutomationSingleton:
             )
         except Exception as e:
             logging.error(f"Unexpected error in audio_playback_to_all-function: {e}")
+        finally:
+            await client.close()  # close underlying session/resources
 
     @classmethod
     async def start_continous_dtmf_recognition(cls, call_connection_id: str, operation_context: str):
-        logging.info('Retrieving call connection client with ID: ' + call_connection_id)
-        call_connection_client = await cls.get_call_connection_client(call_connection_id=call_connection_id)
+        client = cls.get_new_client()
+        call_connection_client = client.get_call_connection(call_connection_id)
         logging.info('Started running start_continous_dtmf_recognition-function')
         try:
             call_props = await call_connection_client.get_call_properties()

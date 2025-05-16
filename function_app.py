@@ -14,6 +14,7 @@ from utility import *
 from config import *
 
 running_tasks = {}  # global or class-level dict
+callback_url = os.getenv("CALLBACK_URL")
 
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -116,7 +117,18 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                     except Exception as e:
                         logging.error(f"Error during handling connection: {e}")
 
-                asyncio.run(handle_connection())
+                # Instead of asyncio.run(handle_connection()), schedule the coroutine in the current loop:
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                # loop.create_task(handle_connection())
+                loop.run_until_complete(handle_connection())
+                # asyncio.get_running_loop().run_until_complete(handle_connection())
+
+                # asyncio.run(handle_connection())
                 
 
             
@@ -226,15 +238,18 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                                             callback_url=callback_url, 
                                             container_name="audio-for-playback", 
                                             blob_name="denne-samtalen-blir-transkribert-i-sanntid.wav")
-                            case "four":
-                                try:
-                                    audio_playback_to_all(call_connection_client, 
-                                                        operation_context="gjentar-tast-en-to-tre-combined", 
-                                                        callback_url=callback_url, 
-                                                        container_name="audio-for-playback", 
-                                                        blob_name="tast-en-to-tre-combined.wav")
-                                except Exception as e:
-                                    logging.error(f"Failed to start audio playback after tast to dtmf: {e}")
+                            # case "four":
+                            #     try:
+                            #         # audio_playback_to_all(call_connection_client, 
+                            #         #                     operation_context="gjentar-tast-en-to-tre-combined", 
+                            #         #                     callback_url=callback_url, 
+                            #         #                     container_name="audio-for-playback", 
+                            #         #                     blob_name="tast-en-to-tre-combined.wav")
+                            #         call_connection_client.cancel_all_media_operations()
+
+                            #     except Exception as e:
+                            #         logging.error(f"Failed to start audio playback after tast to dtmf: {e}")
+                            
                     except Exception as e:
                         logging.error(f"Failed to start audio playback after ContinuousDtmfRecognitionToneReceived: {e}")
 
@@ -329,11 +344,11 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                     call_id = event.get("data").get("callConnectionId")
                     logging.info(f"Call disconnected with ID: {call_id}")
 
-                    tasks = running_tasks.get(call_id, [])
-                    if any(not task.done() for task in tasks):
-                        # There are still unfinished tasks for this call
-                        logging.info("Cleaning up async tasks for call...")
-                        cleanup_call(running_tasks, call_id)
+                    # tasks = running_tasks.get(call_id, [])
+                    # if any(not task.done() for task in tasks):
+                    #     # There are still unfinished tasks for this call
+                    #     logging.info("Cleaning up async tasks for call...")
+                    #     cleanup_call(running_tasks, call_id)
                 except Exception as e:
                     logging.error(f"Error processing CallDisconnected event: {e}")
 

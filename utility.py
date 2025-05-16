@@ -257,7 +257,7 @@ def recognize_dtmf(operation_context: str,
         call_properties = call_connection_client.get_call_properties()
         match call_properties.source.kind:
             case az_call.CommunicationIdentifierKind.PHONE_NUMBER:
-                call_connection_client.cancel_all_media_operations()
+                # call_connection_client.cancel_all_media_operations()
                 user_phone_number = PhoneNumberIdentifier(call_properties.source.properties.get("value"))
                 call_connection_client.start_recognizing_media(
                     input_type=az_call.RecognizeInputType.DTMF,
@@ -266,13 +266,13 @@ def recognize_dtmf(operation_context: str,
                     play_prompt=return_file_source_with_sas_token(container_name="audio-for-playback", blob_name=play_back_audio_file, 
                                                                 delegation_key=delegation_key) if play_audio else None,
                     dtmf_max_tones_to_collect=max_tones_to_collect,
-                    dtmf_inter_tone_timeout=5,
+                    dtmf_inter_tone_timeout=10,
                     interrupt_prompt=True,
                     operation_context=operation_context,
                     dtmf_stop_tones=[az_call.DtmfTone.POUND]
                 )
             case az_call.CommunicationIdentifierKind.COMMUNICATION_USER:
-                call_connection_client.cancel_all_media_operations()
+                # call_connection_client.cancel_all_media_operations()
                 user_client = CommunicationUserIdentifier(call_properties.source.raw_id)
                 call_connection_client.start_recognizing_media(
                     input_type=az_call.RecognizeInputType.DTMF,
@@ -281,7 +281,7 @@ def recognize_dtmf(operation_context: str,
                     play_prompt=return_file_source_with_sas_token(container_name="audio-for-playback", blob_name=play_back_audio_file, 
                                                                 delegation_key=delegation_key) if play_audio else None,
                     dtmf_max_tones_to_collect=max_tones_to_collect,
-                    dtmf_inter_tone_timeout=5,
+                    dtmf_inter_tone_timeout=10,
                     interrupt_prompt=True,
                     operation_context=operation_context,
                     dtmf_stop_tones=[az_call.DtmfTone.POUND]
