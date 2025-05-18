@@ -3,13 +3,14 @@ import os
 import azure.functions as func
 import requests
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import ResourceExistsError
+from azure.core.exceptions import ResourceExistsError, ClientAuthenticationError
 from datetime import datetime, timezone
 from azure.communication.identity import CommunicationIdentityClient
 from CallAutomationSingleton import CallAutomationSingleton
 from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
 import asyncio
 from azure.storage.blob import ContentSettings
+import config
 import globals
 
 # user functions
@@ -17,7 +18,6 @@ from utility import *
 from config import *
 
 running_tasks = {}  # global or class-level dict
-callback_url = os.getenv("CALLBACK_URL")
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -161,8 +161,6 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                 #     asyncio.set_event_loop(loop)
 
                 # loop.run_until_complete(handle_connection())
-                # loop.create_task(handle_connection())
-                # asyncio.get_running_loop().run_until_complete(handle_connection())
 
                 asyncio.run(handle_connection())
                 
@@ -404,26 +402,48 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="generate-user-and-token", auth_level=func.AuthLevel.ANONYMOUS)
 @app.function_name(name="GenerateUserAndToken")
-def generate_token(req: func.HttpRequest) -> func.HttpResponse:
-    communication_identity_client = CommunicationIdentityClient(os.getenv("ACS_ENDPOINT"), AzureKeyCredential(os.getenv("ACS_KEY")))
+def generate_user_and_token(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Python HTTP trigger function processed a request.')
+    try:
+        communication_identity_client = CommunicationIdentityClient(os.getenv("ACS_ENDPOINT"), AzureKeyCredential(os.getenv("ACS_KEY")))
+        logging.info(f"Created communication_identity_client using acs endpoint and key: {communication_identity_client}")
+        user, token = communication_identity_client.create_user_and_token(["voip"])
+    except ClientAuthenticationError as e:
+        logging.error(f"Error creating user and token using acs endpoint and key: {e}")
+        logging.info(f"Creating user and token using connection string instead...")
+        communication_identity_client = CommunicationIdentityClient.from_connection_string(acs_connection_string)
+        logging.info(f"Created communication_identity_client using connection string: {communication_identity_client}")
+        user, token = communication_identity_client.create_user_and_token(["voip"])
+    except Exception as e:
+        logging.error(f"Error creating user and token: {e}")
+        return func.HttpResponse(f"Error creating user and token: {e}", status_code=500)
 
-    user, token = communication_identity_client.create_user_and_token(["voip"])
-    user_and_token_data = {
-        "user": {
-            "kind": user.kind.value,
-            "properties": user.properties,
-            "rawId": user.raw_id
-        },
-        "token": {
-            "tokenValue": token.token,
-            "expiresOn": token.expires_on
+    logging.info(f"Created user: {user}")
+    logging.info(f"Created token: {token}")
+    try:
+        user_and_token_data = {
+            "user": {
+                "kind": user.kind.value,
+                "properties": user.properties,
+                "rawId": user.raw_id
+            },
+            "token": {
+                "tokenValue": token.token,
+                "expiresOn": token.expires_on
+            }
         }
-    }
 
-    json_user_and_token_data = json.dumps(user_and_token_data, indent=4)
+        json_user_and_token_data = json.dumps(user_and_token_data, indent=4)
+    except Exception as e:
+        logging.error(f"Error converting user and token data to JSON: {e}")
+        return func.HttpResponse(f"Error converting user and token data to JSON: {e}", status_code=500)
 
+    logging.info(f"User and token data converted to JSON: {json_user_and_token_data}")
+
+    logging.info("Returning user and token data...")
     return func.HttpResponse(json_user_and_token_data, 
-                             status_code=200, 
-                             headers={"Access-Control-Allow-Origin": "http://localhost:8080"
-                                      }, 
-                             mimetype="application/json")
+                            status_code=200, 
+                            headers={"Access-Control-Allow-Origin": "http://localhost:8080"
+                                    }, 
+                            mimetype="application/json")
+
