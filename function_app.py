@@ -154,17 +154,17 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                         await client.close()
 
                 # Instead of asyncio.run(handle_connection()), schedule the coroutine in the current loop:
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                # try:
+                #     loop = asyncio.get_event_loop()
+                # except RuntimeError:
+                #     loop = asyncio.new_event_loop()
+                #     asyncio.set_event_loop(loop)
 
+                # loop.run_until_complete(handle_connection())
                 # loop.create_task(handle_connection())
-                loop.run_until_complete(handle_connection())
                 # asyncio.get_running_loop().run_until_complete(handle_connection())
 
-                # asyncio.run(handle_connection())
+                asyncio.run(handle_connection())
                 
 
             
@@ -402,11 +402,28 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
-@app.route(route="generate-user-and-token", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="generate-user-and-token", auth_level=func.AuthLevel.ANONYMOUS)
 @app.function_name(name="GenerateUserAndToken")
 def generate_token(req: func.HttpRequest) -> func.HttpResponse:
     communication_identity_client = CommunicationIdentityClient(os.getenv("ACS_ENDPOINT"), AzureKeyCredential(os.getenv("ACS_KEY")))
 
-    user_and_token = communication_identity_client.create_user_and_token(["voip"])
+    user, token = communication_identity_client.create_user_and_token(["voip"])
+    user_and_token_data = {
+        "user": {
+            "kind": user.kind.value,
+            "properties": user.properties,
+            "rawId": user.raw_id
+        },
+        "token": {
+            "tokenValue": token.token,
+            "expiresOn": token.expires_on
+        }
+    }
 
-    return func.HttpResponse(user_and_token, status_code=200)
+    json_user_and_token_data = json.dumps(user_and_token_data, indent=4)
+
+    return func.HttpResponse(json_user_and_token_data, 
+                             status_code=200, 
+                             headers={"Access-Control-Allow-Origin": "http://localhost:8080"
+                                      }, 
+                             mimetype="application/json")
