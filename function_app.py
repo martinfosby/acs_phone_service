@@ -59,9 +59,9 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
             logging.info("Using webapp")
             try:
                 res = requests.post("transkribering-aca--0000003.mangomushroom-c303d47a.norwayeast.azurecontainerapps.io/transcribe", json=recording_data_and_call_data)
-                logging.info(f"Webhook response: {res.status_code}, {res.text}")
+                logging.info(f"webapp response: {res.status_code}, {res.text}")
             except requests.exceptions.RequestException as e:
-                logging.error(f"Error sending webhook: {e}")
+                logging.error(f"Error sending webapp: {e}")
         else:
             logging.info("Not using webapp")
             blob_service_client = BlobServiceClient(
