@@ -58,7 +58,7 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
         if os.getenv("USE_WEBAPP") == "true":
             logging.info("Using webapp")
             try:
-                res = requests.post("transkribering-aca--0000003.mangomushroom-c303d47a.norwayeast.azurecontainerapps.io/transcribe", json=recording_data_and_call_data)
+                res = requests.post(os.getenv("WEBAPP_URL") + "/transcribe", json=recording_data_and_call_data)
                 logging.info(f"webapp response: {res.status_code}, {res.text}")
             except requests.exceptions.RequestException as e:
                 logging.error(f"Error sending webapp: {e}")
