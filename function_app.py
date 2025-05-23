@@ -51,38 +51,43 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
     if event_type == "Microsoft.Communication.RecordingFileStatusUpdated":
         logging.info('Recording file status updated event received')
         logging.info("Uploading recording to blob storage...")
-        blob_service_client = BlobServiceClient(
-            account_url="https://stfeilmelding001.blob.core.windows.net", 
-            credential=default_credential if os.getenv("CLOUD_ENV") == "azure" else named_key_credential)
-        
-        container_name = "recording-and-call-data"
-        try:
-            container_client = blob_service_client.create_container(name=container_name)
-        except ResourceExistsError:
-            logging.info("Container already exists")
-
-        blob_client: BlobClient = blob_service_client.get_blob_client(container=container_name, blob=event_data.get("recordingId") + ".json")
-        
         recording_data_and_call_data = {
-            **event_data,
-            **globals.call_data
-        }
+                **event_data,
+                **globals.call_data
+            }
+        if os.getenv("USE_WEBAPP") == "true":
+            logging.info("Using webapp")
+            try:
+                res = requests.post("transkribering-aca--0000003.mangomushroom-c303d47a.norwayeast.azurecontainerapps.io/transcribe", json=recording_data_and_call_data)
+                logging.info(f"Webhook response: {res.status_code}, {res.text}")
+            except requests.exceptions.RequestException as e:
+                logging.error(f"Error sending webhook: {e}")
+        else:
+            logging.info("Not using webapp")
+            blob_service_client = BlobServiceClient(
+                account_url="https://stfeilmelding001.blob.core.windows.net", 
+                credential=default_credential if os.getenv("CLOUD_ENV") == "azure" else named_key_credential)
+            
+            container_name = "recording-and-call-data"
+            try:
+                container_client = blob_service_client.create_container(name=container_name)
+            except ResourceExistsError:
+                logging.info("Container already exists")
 
-        blob_client.upload_blob(
-            json.dumps(recording_data_and_call_data, indent=4),
-            metadata={
-                "processed": "false",
-                "language": "nb-NO",
-                "priority": "high",
-                "transcribed": "false"
-            },
-            content_settings=ContentSettings(content_type='application/json')
-        )
-        try:
-            res = requests.post("http://127.0.0.1:5000/webhook", json=event_data)
-            logging.info(f"Webhook response: {res.status_code}, {res.text}")
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error sending webhook: {e}")
+            blob_client: BlobClient = blob_service_client.get_blob_client(container=container_name, blob=event_data.get("recordingId") + ".json")
+            
+            
+
+            blob_client.upload_blob(
+                json.dumps(recording_data_and_call_data, indent=4),
+                metadata={
+                    "processed": "false",
+                    "language": "nb-NO",
+                    "priority": "high",
+                    "transcribed": "false"
+                },
+                content_settings=ContentSettings(content_type='application/json')
+            )
         
         # recording_file_status = event_data.get("recordingFileStatus")
         # recording_url = event_data.get("recordingUrl")
