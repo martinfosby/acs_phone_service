@@ -53,8 +53,9 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
         logging.info("Uploading recording to blob storage...")
         recording_data_and_call_data = {
                 **event_data,
-                **globals.call_data
-            }
+                **globals.call_data,
+                "json_data_from_telephone": True
+        }
         if os.getenv("USE_WEBAPP") == "true":
             logging.info("Using webapp")
             try:
