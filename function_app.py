@@ -118,7 +118,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
             elif event_type == "Microsoft.Communication.CallConnected":
                 # Safely get the call connection ID
-                call_connection_id = event.get("data").get("callConnectionId")
+                call_connection_id = event.get("data", {}).get("callConnectionId")
                 logging.info(f"Call is now connected. ID: {call_connection_id}")
 
                 # Add timer to stop the call after a delay
