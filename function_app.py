@@ -10,7 +10,6 @@ from CallAutomationSingleton import CallAutomationSingleton
 from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
 import asyncio
 from azure.storage.blob import ContentSettings
-import config
 import globals
 
 # user functions
@@ -50,12 +49,12 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
 
     if event_type == "Microsoft.Communication.RecordingFileStatusUpdated":
         logging.info('Recording file status updated event received')
-        logging.info("Uploading recording to blob storage...")
         recording_data_and_call_data = {
                 **event_data,
                 **globals.call_data,
                 "json_data_from_telephone": True
         }
+        logging.info(f"recording_data_and_call_data: {recording_data_and_call_data}")
         if os.getenv("USE_WEBAPP") == "true":
             logging.info("Using webapp")
             try:
@@ -65,6 +64,7 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
                 logging.error(f"Error sending webapp: {e}")
         else:
             logging.info("Not using webapp")
+            logging.info("Uploading recording to blob storage...")
             blob_service_client = BlobServiceClient(
                 account_url="https://stfeilmelding001.blob.core.windows.net", 
                 credential=default_credential if os.getenv("CLOUD_ENV") == "azure" else named_key_credential)
@@ -89,11 +89,6 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
                 },
                 content_settings=ContentSettings(content_type='application/json')
             )
-        
-        # recording_file_status = event_data.get("recordingFileStatus")
-        # recording_url = event_data.get("recordingUrl")
-        # logging.info(f"Recording file status: {recording_file_status}")
-        # logging.info(f"Recording URL: {recording_url}")
 
 
 
@@ -158,15 +153,6 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                         logging.error(f"Error during handling connection: {e}")
                     finally:
                         await client.close()
-
-                # Instead of asyncio.run(handle_connection()), schedule the coroutine in the current loop:
-                # try:
-                #     loop = asyncio.get_event_loop()
-                # except RuntimeError:
-                #     loop = asyncio.new_event_loop()
-                #     asyncio.set_event_loop(loop)
-
-                # loop.run_until_complete(handle_connection())
 
                 asyncio.run(handle_connection())
                 
