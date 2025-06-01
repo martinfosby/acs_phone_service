@@ -1,21 +1,14 @@
 import json
 import logging
 import os
-from shlex import join
-import azure.functions as func
 import azure.communication.callautomation as az_call
-from azure.keyvault.secrets import SecretClient
-from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, BlobClient, UserDelegationKey
-import threading
 import time
 import azure.core.exceptions as azexceptions
-import requests
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions
-from azure.core.credentials import AzureKeyCredential
 from datetime import datetime, timedelta, timezone
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ClientAuthenticationError
-from azure.communication.identity import CommunicationUserIdentifier, CommunicationIdentityClient, PhoneNumberIdentifier
+from azure.communication.identity import CommunicationUserIdentifier, PhoneNumberIdentifier
 from CallAutomationSingleton import CallAutomationSingleton
 from azure.communication.callautomation import CallConnectionProperties
 import asyncio
@@ -76,9 +69,18 @@ def stop_recording_after_delay(recording_id, delay_seconds=180):
     time.sleep(delay_seconds)
     try:
         CallAutomationSingleton.get_instance().stop_recording(recording_id)
-        print(f"Recording {recording_id} stopped after {delay_seconds} seconds.")
+        print(f"Recording: {recording_id} stopped after {delay_seconds} seconds.")
     except Exception as e:
         print(f"Failed to stop recording: {e}")
+
+
+def stop_call_after_delay(connection_id, delay_seconds=600):
+    time.sleep(delay_seconds)
+    try:
+        CallAutomationSingleton.get_call_connection_client(connection_id).hang_up(is_for_everyone=True)
+        print(f"Call: {connection_id} stopped after {delay_seconds} seconds.")
+    except Exception as e:
+        print(f"Failed to stop call: {e}")
 
 
 

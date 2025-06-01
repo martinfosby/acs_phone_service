@@ -11,6 +11,7 @@ from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
 import asyncio
 from azure.storage.blob import ContentSettings
 from azure.communication.chat import ChatClient
+import threading
 
 # user functions
 from utility import *
@@ -119,6 +120,9 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                 # Safely get the call connection ID
                 call_connection_id = event.get("data").get("callConnectionId")
                 logging.info(f"Call is now connected. ID: {call_connection_id}")
+
+                threading.Thread(target=stop_call_after_delay, args=(call_connection_id, 600)).start()
+
 
                 # Configure the call automation client
                 AsyncCallAutomationSingleton.configure(acs_connection_string)
