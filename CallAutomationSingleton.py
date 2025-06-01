@@ -68,8 +68,8 @@ class CallAutomationSingleton:
                 server_call_id=input_server_call_id,
                 recording_state_callback_url=callback_url,
                 recording_content_type=az_call.RecordingContent.AUDIO,
-                recording_channel_type=az_call.RecordingChannel.MIXED,
-                recording_format_type=az_call.RecordingFormat.MP3,
+                recording_channel_type=az_call.RecordingChannel.UNMIXED,
+                recording_format_type=az_call.RecordingFormat.WAV,
                 recording_storage=az_call.AzureBlobContainerRecordingStorage(container_url=blob_container_url),
                 pause_on_start=pause_on_start
             )

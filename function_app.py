@@ -10,11 +10,12 @@ from CallAutomationSingleton import CallAutomationSingleton
 from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
 import asyncio
 from azure.storage.blob import ContentSettings
-import globals
+from azure.communication.chat import ChatClient
 
 # user functions
 from utility import *
 from config import *
+import globals
 
 running_tasks = {}  # global or class-level dict
 
@@ -439,3 +440,17 @@ def generate_user_and_token(req: func.HttpRequest) -> func.HttpResponse:
                                     }, 
                             mimetype="application/json")
 
+
+
+@app.function_name("TranscriptionAciTestSendBackToAcsUserBlobTrigger")
+@app.blob_trigger(arg_name="myblob", path="transkriberinger-aci-test/{name}",
+                               connection="AZURE_STORAGE_CONNECTION_STRING") 
+def transcription_aci_test_send_back_to_acs_user_blob_trigger(myblob: func.InputStream):
+    logging.info(f"Python blob trigger function processed blob \n"
+                f"Name: {myblob.name} \n"
+                f"Blob Size: {myblob.length} bytes \n")
+    
+    if myblob.name.endswith(".json") :
+        logging.info("JSON file detected. Processing...")
+        chat_client = ChatClient(os.getenv("ACS_ENDPOINT"), AzureKeyCredential(os.getenv("ACS_KEY")))
+        chat_client.get_chat_thread_client()
