@@ -64,6 +64,11 @@ class CallAutomationSingleton:
             
             call_automation_client = cls.get_instance()
 
+            # Mixed Audio Recording: kr0.0204/minute
+            # Mixed Audio and Video Recording: kr0.1018/minute
+            # Unmixed Audio Recording: kr0.0123/minute/participant
+            # Unmixed audio is cheaper than mixed audio recording.
+            # Note: MP3 only supports mixed audio recording, not unmixed audio recording.
             response = call_automation_client.start_recording(
                 server_call_id=input_server_call_id,
                 recording_state_callback_url=callback_url,
