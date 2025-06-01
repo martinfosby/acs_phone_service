@@ -45,6 +45,26 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
         call_automation_client = CallAutomationSingleton.get_instance(acs_connection_string)
         # call_automation_client = get_call_automation_client()
         logging.info(f'Created call_automation_client {call_automation_client}')
+
+        # Pricing after answering the call:
+        # PSTN pricing as of date: 1.06.2025: 
+        # Norway telephony offers:
+        # Phone number leasing charges
+        # Number type	Monthly fee
+        # Geographic	USD 5.00/mo
+        # Toll-Free	    USD 20.00/mo
+
+        # Usage charges:
+        # Number type	To make calls*	To receive calls
+        # Geographic	Starting at USD 0.0200/min	USD 0.0300/min
+        # Toll-free	    Starting at USD 0.0200/min	USD 0.1500/min
+
+        # app charges:
+        # no leasing charges
+        # Usage charges:
+        # Voice and Video Calling – Over IP	kr0.0407/User minute as of date: 1.06.2025
+
+        # see https://learn.microsoft.com/en-us/azure/communication-services/concepts/pstn-pricing?source=recommendations#norway-telephony-offers for more details
         call_connection_properties = call_automation_client.answer_call(event_data.get("incomingCallContext"), callback_url)
         logging.info(f'Answered call with connection properties: {call_connection_properties}')
         
@@ -112,7 +132,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
             if event_type == "Microsoft.Communication.AddParticipantSucceeded":
                 logging.info('AddParticipantSucceeded event received')
-                call_connection_id = event.get("data").get("callConnectionId")
+                call_connection_id = event.get("data", {}).get("callConnectionId")
                 logging.info(f"Participant added to call with ID: {call_connection_id}")
 
 
@@ -167,9 +187,9 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
             elif event_type == "Microsoft.Communication.RecognizeCompleted":
                 logging.info('RecognizeCompleted event received')
-                operation_context = event.get("data").get("operationContext")
+                operation_context = event.get("data", {}).get("operationContext")
                 logging.info(f"Recognize operation completed with context: {operation_context}")
-                result_information = event.get("data").get("resultInformation")
+                result_information = event.get("data", {}).get("resultInformation")
                 logging.info(f"Result information: {result_information}")
                 dtmf_result = event.get("data").get("dtmfResult")
                 tones = dtmf_result.get("tones")
