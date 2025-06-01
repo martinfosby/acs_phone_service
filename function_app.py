@@ -121,6 +121,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                 call_connection_id = event.get("data").get("callConnectionId")
                 logging.info(f"Call is now connected. ID: {call_connection_id}")
 
+                # Add timer to stop the call after a delay
                 threading.Thread(target=stop_call_after_delay, args=(call_connection_id, 600)).start()
 
 
