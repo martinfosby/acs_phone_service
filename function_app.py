@@ -142,7 +142,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                 logging.info(f"Call is now connected. ID: {call_connection_id}")
 
                 # Add timer to stop the call after a delay
-                threading.Thread(target=stop_call_after_delay, args=(call_connection_id, 600)).start()
+                threading.Thread(target=stop_call_after_delay, args=(call_connection_id, os.getenv("CALL_STOP_DELAY"))).start()
 
 
                 # Configure the call automation client
@@ -340,7 +340,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
                         # Start a background thread to stop the recording later
                         recording_id = recording_properties.recording_id
-                        threading.Thread(target=stop_recording_after_delay, args=(recording_id, 180)).start()
+                        threading.Thread(target=stop_recording_after_delay, args=(recording_id, os.getenv("RECORDING_STOP_DELAY"))).start()
 
                     case "denne-samtalen-blir-transkribert-i-sanntid":
                         call_connection_client = CallAutomationSingleton.get_call_connection_client(event.get("data").get("callConnectionId"))

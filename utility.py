@@ -66,21 +66,30 @@ def get_blob_client_from_blob_service_client(container_name: str, blob_name: str
 
 
 def stop_recording_after_delay(recording_id, delay_seconds=180):
-    time.sleep(delay_seconds)
+    try:
+        time.sleep(delay_seconds)
+    except Exception as e:
+        logging.error(f"Error during sleep in stop_recording_after_delay: {e}")
+        return
+    
     try:
         CallAutomationSingleton.get_instance().stop_recording(recording_id)
-        print(f"Recording: {recording_id} stopped after {delay_seconds} seconds.")
+        logging.info(f"Recording: {recording_id} stopped after {delay_seconds} seconds.")
     except Exception as e:
-        print(f"Failed to stop recording: {e}")
+        logging.error(f"Failed to stop recording: {e}")
 
 
 def stop_call_after_delay(connection_id, delay_seconds=600):
-    time.sleep(delay_seconds)
+    try:
+        time.sleep(delay_seconds)
+    except Exception as e:
+        logging.error(f"Error during sleep in stop_call_after_delay: {e}")
+        return    
     try:
         CallAutomationSingleton.get_call_connection_client(connection_id).hang_up(is_for_everyone=True)
-        print(f"Call: {connection_id} stopped after {delay_seconds} seconds.")
+        logging.info(f"Call: {connection_id} stopped after {delay_seconds} seconds.")
     except Exception as e:
-        print(f"Failed to stop call: {e}")
+        logging.error(f"Failed to stop call: {e}")
 
 
 
