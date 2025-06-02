@@ -66,7 +66,14 @@ def get_blob_client_from_blob_service_client(container_name: str, blob_name: str
 
 
 def stop_recording_after_delay(recording_id, delay_seconds=180):
+    if isinstance(delay_seconds, str):
+        try:
+            delay_seconds = float(delay_seconds)
+        except ValueError:
+            logging.error(f"Invalid delay_seconds value: {delay_seconds}. Must be an float.")
+            return
     try:
+        logging.info(f"Stopping recording: {recording_id} after {delay_seconds} seconds.")
         time.sleep(delay_seconds)
     except Exception as e:
         logging.error(f"Error during sleep in stop_recording_after_delay: {e}")
@@ -80,7 +87,14 @@ def stop_recording_after_delay(recording_id, delay_seconds=180):
 
 
 def stop_call_after_delay(connection_id, delay_seconds=600):
+    if isinstance(delay_seconds, str):
+        try:
+            delay_seconds = float(delay_seconds)
+        except ValueError:
+            logging.error(f"Invalid delay_seconds value: {delay_seconds}. Must be an float.")
+            return
     try:
+        logging.info(f"Stopping call: {connection_id} after {delay_seconds} seconds.")
         time.sleep(delay_seconds)
     except Exception as e:
         logging.error(f"Error during sleep in stop_call_after_delay: {e}")

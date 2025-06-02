@@ -402,6 +402,8 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                     call_id = event.get("data").get("callConnectionId")
                     logging.info(f"Call disconnected with ID: {call_id}")
 
+                    # CallAutomationSingleton.get_instance().close()
+                    
                     # tasks = running_tasks.get(call_id, [])
                     # if any(not task.done() for task in tasks):
                     #     # There are still unfinished tasks for this call
