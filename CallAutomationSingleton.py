@@ -11,7 +11,7 @@ class CallAutomationSingleton:
     _lock = threading.Lock()  # To make it thread-safe
 
     @classmethod
-    def get_instance(cls, acs_connection_string=None, aio=False):
+    def get_instance(cls, acs_connection_string=None):
         with cls._lock:
             if cls._instance is None:
                 # try:

@@ -1,3 +1,4 @@
+from html import entities
 import logging
 import os
 import azure.functions as func
@@ -11,12 +12,13 @@ from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
 import asyncio
 from azure.storage.blob import ContentSettings
 from azure.communication.chat import ChatClient
+from azure.data.tables import TableServiceClient
 import threading
+import re
 
 # user functions
 from utility import *
 from config import *
-import globals
 
 running_tasks = {}  # global or class-level dict
 
@@ -25,7 +27,12 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 @app.event_grid_trigger(arg_name="event")
 @app.function_name(name="PhoneRecordEventGridTrigger")
 def phone_record_event_grid_trigger(event: func.EventGridEvent): 
-    logging.info('Python EventGrid trigger processed an event')
+    logging.info(f'Python EventGrid trigger processed an event: {event}')
+    logging.info(f"Event ID: {event.id}")
+    logging.info(f"Event Type: {event.event_type}")
+    logging.info(f"Event Subject: {event.subject}")
+    logging.info(f"Event Topic: {event.topic}")
+    logging.info(f"Event Data Version: {event.data_version}")
     logging.info(f"Event received at: {datetime.now(timezone.utc)}, event time: {event.event_time}")
     event_data = event.get_json()
     logging.info(f'Event data: {event_data}')
@@ -71,10 +78,32 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
 
     if event_type == "Microsoft.Communication.RecordingFileStatusUpdated":
         logging.info('Recording file status updated event received')
+        # event_subject = '/recording/call/b054b2f7-eb25-4f51-955c-be0ed5599d48/serverCallId/aHR0cHM6Ly9hcGkuZmxpZ2h0cHJveHkuc2t5cGUuY29tL2FwaS92Mi9jcC9jb252LWZyY2UtMDItcHJvZC1ha3MuY29udi5za3lwZS5jb20vY29udi9VRy1YeThFUDBVR2dzZWlHRDNCLWlnP2k9MTAtNjAtOS00MCZlPTYzODg0MDU4OTUxNjExMzc4NA==/recordingId/eyJQbGF0Zm9ybUVuZHBvaW50SWQiOiIxYjAwNTM4MC01NTNhLTQ5YzgtYTdhMC02ZDlhMzAwNTg5YWQiLCJSZXNvdXJjZVNwZWNpZmljSWQiOiJlMGRmMTMwYS1hNDEyLTRjOWYtYmQwNC01NTVkMGI1NjI1ZWQifQ'
+        correlation_id_match = re.search(r'/call/([a-f0-9\-]{36})', event.subject)
+        server_call_id_match = re.search(r'serverCallId/([^/]+)', event.subject)
+        if correlation_id_match and server_call_id_match:
+            logging.info(f"Found correlation ID and server call ID in event subject: {event.subject}")
+            correlation_id = correlation_id_match.group(1)
+            server_call_id = server_call_id_match.group(1)
+            logging.info(f"Extracted correlation ID: {correlation_id}, server call ID: {server_call_id}")
+            table_service_client = TableServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+            table = table_service_client.create_table_if_not_exists("calldata")
+            logging.info(f"Retrieved table: {table}")
+            found_entity = table.get_entity(partition_key=server_call_id, row_key=correlation_id)
+            # queryied = table.query_entities(
+            #     query_filter=f"correlation_id eq '{correlation_id}'"
+            # )
+            # entities = list(queryied)
+            # if entities:
+            #     logging.info(f"Found entities: {entities}")
+            #     found_entity = entities[0].__dict__
+            #     logging.info(f"Event data: {found_entity}")
+        else:
+            logging.error("Failed to extract call connection ID from event subject")
         recording_data_and_call_data = {
-                **event_data,
-                **globals.call_data,
-                "json_data_from_telephone": True
+            **event_data,
+            **found_entity,
+            "json_data_from_telephone": True
         }
         logging.info(f"recording_data_and_call_data: {recording_data_and_call_data}")
         if os.getenv("USE_WEBAPP") == "true":
@@ -132,11 +161,15 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
             if event_type == "Microsoft.Communication.AddParticipantSucceeded":
                 logging.info('AddParticipantSucceeded event received')
+                logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
+
                 call_connection_id = event.get("data", {}).get("callConnectionId")
                 logging.info(f"Participant added to call with ID: {call_connection_id}")
 
 
             elif event_type == "Microsoft.Communication.CallConnected":
+                logging.info('CallConnected event received')
+                logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
                 # Safely get the call connection ID
                 call_connection_id = event.get("data", {}).get("callConnectionId")
                 logging.info(f"Call is now connected. ID: {call_connection_id}")
@@ -187,6 +220,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
             elif event_type == "Microsoft.Communication.RecognizeCompleted":
                 logging.info('RecognizeCompleted event received')
+                logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
                 operation_context = event.get("data", {}).get("operationContext")
                 logging.info(f"Recognize operation completed with context: {operation_context}")
                 result_information = event.get("data", {}).get("resultInformation")
@@ -212,15 +246,26 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
                     call_properties = call_connection_client.get_call_properties()
                     logging.info(f"Call properties: {call_properties}")
 
+                    
+
                     try:
                         call_data = interpret_dtmf(tones, call_properties)
-                        globals.call_data = call_data
-                        upload_interpret_dtmf(call_data=call_data, call_properties=call_properties)
+                        service = TableServiceClient.from_connection_string(os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+                        table = service.create_table_if_not_exists("calldata")
+
+                        table.upsert_entity({
+                            "PartitionKey": event.get("data").get("serverCallId"),
+                            "RowKey": event.get("data").get("correlationId"),
+                            **call_data,
+                        })
+                        # upload_interpret_dtmf(call_data=call_data, call_properties=call_properties)
                     except Exception as e:
                         logging.error(f"Failed to interpret DTMF: {e}")
 
             elif event_type == "Microsoft.Communication.RecognizeFailed":
                 logging.info('RecognizeFailed event received')
+                logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
+
                 logging.warning(f"Warning RecognizeFailed: {event.get('data').get('resultInformation')}")
 
                 call_connection_client = CallAutomationSingleton.get_call_connection_client(event.get("data").get("callConnectionId"))
@@ -256,6 +301,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
             elif event_type == "Microsoft.Communication.ContinuousDtmfRecognitionToneReceived":
                 logging.info('ContinuousDtmfRecognitionToneReceived event received')
+                logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
 
                 tone = event.get("data").get("tone")
                 logging.info(f"Received tone: {tone}")
@@ -316,6 +362,8 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
 
             elif event_type == "Microsoft.Communication.PlayCompleted":
                 logging.info('PlayCompleted event received')
+                logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
+
                 operation_context = event.get("data").get("operationContext")
                 server_call_id = event.get("data").get("serverCallId")
                 logging.info(f"Play operation completed with context: {operation_context}")
@@ -383,6 +431,7 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
             elif event_type == "Microsoft.Communication.RecordingStateChanged":
                 try:
                     logging.info('RecordingStateChanged event received')
+                    logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
                     state = event.get("data").get("state")
                     logging.info(f"Recording state changed to: {state}")
                 except Exception as e:
@@ -391,6 +440,8 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
             elif event_type == "Microsoft.Communication.PlayFailed":
                 try:
                     logging.info('PlayFailed event received')
+                    logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
+
                     result_information = event.get("resultInformation")
                     logging.info(f"Play failed with result: {result_information}")
                 except Exception as e:
@@ -399,11 +450,13 @@ def callback(req: func.HttpRequest) -> func.HttpResponse:
             elif event_type == "Microsoft.Communication.CallDisconnected":
                 try:
                     logging.info('CallDisconnected event received')
+                    logging.info(f"Correlation ID: {event.get('data', {}).get('correlationId')}")
+
                     call_id = event.get("data").get("callConnectionId")
                     logging.info(f"Call disconnected with ID: {call_id}")
 
                     # CallAutomationSingleton.get_instance().close()
-                    
+
                     # tasks = running_tasks.get(call_id, [])
                     # if any(not task.done() for task in tasks):
                     #     # There are still unfinished tasks for this call

@@ -98,7 +98,7 @@ def stop_call_after_delay(connection_id, delay_seconds=600):
         time.sleep(delay_seconds)
     except Exception as e:
         logging.error(f"Error during sleep in stop_call_after_delay: {e}")
-        return    
+        return
     try:
         CallAutomationSingleton.get_call_connection_client(connection_id).hang_up(is_for_everyone=True)
         logging.info(f"Call: {connection_id} stopped after {delay_seconds} seconds.")
@@ -404,21 +404,7 @@ def interpret_dtmf(tones, call_properties: CallConnectionProperties):
             except ValueError:
                 logging.info(f"Invalid tone received: {tone_interpreted}")
                 raise ValueError(f"Invalid tone received: {tone_interpreted}")
-        # call_data = {
-        #     "call_connection_id": call_properties.call_connection_id,
-        #     "call_connection_state": call_properties.call_connection_state,
-        #     "callback_url": call_properties.callback_url,
-        #     "correlation_id": call_properties.correlation_id,
-        #     "server_call_id": call_properties.server_call_id,
-        #     "source": call_properties.source.raw_id,
-        #     "source_caller_id_number": call_properties.source_caller_id_number,
-        #     "source_display_name": call_properties.source_display_name,
-        #     "target": ",".join([target.raw_id for target in call_properties.targets]),
-        #     "answered_by": call_properties.answered_by.raw_id if call_properties.answered_by is not None else None,
-        #     "answered_for": call_properties.answered_for.raw_id if call_properties.answered_for is not None else None,
-        #     "tones": ",".join(tones),
-        #     "tones_interpreted": "".join(tones_interpreted),
-        # }
+
         call_data = {
             "call_connection_id": call_properties.call_connection_id,
             "call_connection_state": call_properties.call_connection_state,
@@ -428,12 +414,17 @@ def interpret_dtmf(tones, call_properties: CallConnectionProperties):
             "source": call_properties.source.raw_id,
             "source_caller_id_number": call_properties.source_caller_id_number,
             "source_display_name": call_properties.source_display_name,
-            "target": [target.raw_id for target in call_properties.targets],
+
+            # Serialize lists to JSON strings
+            "target": json.dumps([target.raw_id for target in call_properties.targets]),
+            "tones": json.dumps(tones),
+
             "answered_by": call_properties.answered_by.raw_id if call_properties.answered_by is not None else None,
             "answered_for": call_properties.answered_for.raw_id if call_properties.answered_for is not None else None,
-            "tones": tones,
+            
             "tones_interpreted": "".join(tones_interpreted),
         }
+
 
         return call_data
 
