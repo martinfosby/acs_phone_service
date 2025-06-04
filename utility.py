@@ -7,7 +7,8 @@ import time
 import azure.core.exceptions as azexceptions
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from datetime import datetime, timedelta, timezone
-from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ClientAuthenticationError
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ClientAuthenticationError, ResourceExistsError
+from azure.storage.blob import ContentSettings
 from azure.communication.identity import CommunicationUserIdentifier, PhoneNumberIdentifier
 from CallAutomationSingleton import CallAutomationSingleton
 from azure.communication.callautomation import CallConnectionProperties
@@ -16,6 +17,43 @@ import asyncio
 from config import *
 from CallAutomationSingleton import CallAutomationSingleton
 
+
+def upload_recording_to_blob(recording_data_and_call_data: dict):
+    """
+    Uploads recording and call data to Azure Blob Storage as a JSON file.
+    
+    :param recording_data_and_call_data: Dictionary containing the recording and call data to be uploaded.
+    """
+    logging.info("Uploading recording to blob storage...")
+
+    blob_service_client = BlobServiceClient(
+        account_url="https://stfeilmelding001.blob.core.windows.net",
+        credential=default_credential if os.getenv("CLOUD_ENV") == "azure" else named_key_credential
+    )
+
+    container_name = "recording-and-call-data"
+    
+    try:
+        container_client = blob_service_client.create_container(name=container_name)
+    except ResourceExistsError:
+        logging.info("Container already exists")
+
+    blob_client: BlobClient = blob_service_client.get_blob_client(
+        container=container_name,
+        blob=f"{recording_data_and_call_data.get('recordingId')}.json"
+    )
+
+    blob_client.upload_blob(
+        json.dumps(recording_data_and_call_data, indent=4),
+        metadata={
+            "processed": "false",
+            "language": "nb-NO",
+            "priority": "high",
+            "transcribed": "false"
+        },
+        content_settings=ContentSettings(content_type='application/json'),
+        overwrite=True
+    )
 
 def get_call_connection_client(call_connection_id: str, call_automation_client: az_call.CallAutomationClient) -> az_call.CallConnectionClient:
     try:

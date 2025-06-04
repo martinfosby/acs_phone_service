@@ -1,16 +1,14 @@
-from html import entities
 import logging
 import os
 import azure.functions as func
 import requests
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import ResourceExistsError, ClientAuthenticationError
+from azure.core.exceptions import ClientAuthenticationError
 from datetime import datetime, timezone
 from azure.communication.identity import CommunicationIdentityClient
 from CallAutomationSingleton import CallAutomationSingleton
 from AsyncCallAutomationSingleton import AsyncCallAutomationSingleton
 import asyncio
-from azure.storage.blob import ContentSettings
 from azure.communication.chat import ChatClient
 from azure.data.tables import TableServiceClient
 import threading
@@ -19,6 +17,7 @@ import re
 # user functions
 from utility import *
 from config import *
+from azure_create_resources import create_container_instance
 
 running_tasks = {}  # global or class-level dict
 
@@ -78,7 +77,8 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
 
     if event_type == "Microsoft.Communication.RecordingFileStatusUpdated":
         logging.info('Recording file status updated event received')
-        # event_subject = '/recording/call/b054b2f7-eb25-4f51-955c-be0ed5599d48/serverCallId/aHR0cHM6Ly9hcGkuZmxpZ2h0cHJveHkuc2t5cGUuY29tL2FwaS92Mi9jcC9jb252LWZyY2UtMDItcHJvZC1ha3MuY29udi5za3lwZS5jb20vY29udi9VRy1YeThFUDBVR2dzZWlHRDNCLWlnP2k9MTAtNjAtOS00MCZlPTYzODg0MDU4OTUxNjExMzc4NA==/recordingId/eyJQbGF0Zm9ybUVuZHBvaW50SWQiOiIxYjAwNTM4MC01NTNhLTQ5YzgtYTdhMC02ZDlhMzAwNTg5YWQiLCJSZXNvdXJjZVNwZWNpZmljSWQiOiJlMGRmMTMwYS1hNDEyLTRjOWYtYmQwNC01NTVkMGI1NjI1ZWQifQ'
+
+        # Extract correlation ID and server call ID from event subject and retrieve entity from Azure Table Storage
         correlation_id_match = re.search(r'/call/([a-f0-9\-]{36})', event.subject)
         server_call_id_match = re.search(r'serverCallId/([^/]+)', event.subject)
         if correlation_id_match and server_call_id_match:
@@ -90,21 +90,17 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
             table = table_service_client.create_table_if_not_exists("calldata")
             logging.info(f"Retrieved table: {table}")
             found_entity = table.get_entity(partition_key=server_call_id, row_key=correlation_id)
-            # queryied = table.query_entities(
-            #     query_filter=f"correlation_id eq '{correlation_id}'"
-            # )
-            # entities = list(queryied)
-            # if entities:
-            #     logging.info(f"Found entities: {entities}")
-            #     found_entity = entities[0].__dict__
-            #     logging.info(f"Event data: {found_entity}")
         else:
             logging.error("Failed to extract call connection ID from event subject")
+        
+        # Gather event data and found entity into a single dictionary
         recording_data_and_call_data = {
             **event_data,
             **found_entity,
             "json_data_from_telephone": True
         }
+
+        # Check environment variables to determine where to send the data
         logging.info(f"recording_data_and_call_data: {recording_data_and_call_data}")
         if os.getenv("USE_WEBAPP") == "true":
             logging.info("Using webapp")
@@ -113,33 +109,15 @@ def phone_record_event_grid_trigger(event: func.EventGridEvent):
                 logging.info(f"webapp response: {res.status_code}, {res.text}")
             except requests.exceptions.RequestException as e:
                 logging.error(f"Error sending webapp: {e}")
+        elif os.getenv("UPLOAD_RECORDING_TO_BLOB") == "true":
+            logging.info("Not using webapp, uploading recording to blob")
+            upload_recording_to_blob(recording_data_and_call_data)
         else:
-            logging.info("Not using webapp")
-            logging.info("Uploading recording to blob storage...")
-            blob_service_client = BlobServiceClient(
-                account_url="https://stfeilmelding001.blob.core.windows.net", 
-                credential=default_credential if os.getenv("CLOUD_ENV") == "azure" else named_key_credential)
-            
-            container_name = "recording-and-call-data"
-            try:
-                container_client = blob_service_client.create_container(name=container_name)
-            except ResourceExistsError:
-                logging.info("Container already exists")
+            logging.info("Making aci direct call to transcription ACI")
+            create_container_instance(recording_data_and_call_data)
 
-            blob_client: BlobClient = blob_service_client.get_blob_client(container=container_name, blob=event_data.get("recordingId") + ".json")
             
             
-
-            blob_client.upload_blob(
-                json.dumps(recording_data_and_call_data, indent=4),
-                metadata={
-                    "processed": "false",
-                    "language": "nb-NO",
-                    "priority": "high",
-                    "transcribed": "false"
-                },
-                content_settings=ContentSettings(content_type='application/json')
-            )
 
 
 

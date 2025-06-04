@@ -16,3 +16,9 @@ azure-communication-chat
 
 # async support
 aiohttp
+
+# Azure SDK for Container Instances
+azure-mgmt-containerinstance
+azure-mgmt-resource
+azure-mgmt-authorization
+azure-mgmt-web
