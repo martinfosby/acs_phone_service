@@ -22,3 +22,5 @@ azure-mgmt-containerinstance
 azure-mgmt-resource
 azure-mgmt-authorization
 azure-mgmt-web
+
+dotenv
