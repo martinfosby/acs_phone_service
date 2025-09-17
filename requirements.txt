@@ -9,6 +9,7 @@ azure-keyvault-secrets==4.7.0
 azure-identity==1.15.0
 azure-storage-blob==12.25.1
 azure-data-tables
+azure-data-tables
 
 # development
 azure-communication-identity
